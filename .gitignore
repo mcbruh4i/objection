@@ -1,0 +1,24 @@
+# Python
+backend/.venv/
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/.pytest_cache/
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+
+# Node / Expo
+mobile/node_modules/
+mobile/.expo/
+mobile/web-build/
+mobile/dist/
+
+# Environment and editor files
+.env
+.env.*
+backend/.env
+mobile/.env
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
