@@ -1,5 +1,8 @@
-import { StatusBar } from "expo-status-bar";
+import { Anton_400Regular } from "@expo-google-fonts/anton";
+import { SpaceGrotesk_400Regular, SpaceGrotesk_500Medium, SpaceGrotesk_700Bold } from "@expo-google-fonts/space-grotesk";
 import { ResizeMode, Video } from "expo-av";
+import { useFonts } from "expo-font";
+import { StatusBar } from "expo-status-bar";
 import * as Haptics from "expo-haptics";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -96,6 +99,15 @@ function mergeFine(ledger: LedgerResponse | null, fine: Fine): LedgerResponse | 
 }
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    Anton_400Regular,
+    SpaceGrotesk_400Regular,
+    SpaceGrotesk_500Medium,
+    SpaceGrotesk_700Bold,
+  });
+  if (!fontsLoaded) {
+    return null;
+  }
   return (
     <SafeAreaProvider>
       <ObjectionApp />
@@ -578,9 +590,11 @@ function ObjectionApp() {
     );
   };
 
+  const courtLayer = screen === "courtroom" || screen === "ledger";
+
   return (
-    <View style={styles.safeArea}>
-      <StatusBar style="dark" />
+    <View style={[styles.safeArea, courtLayer && styles.safeAreaCourt]}>
+      <StatusBar style={courtLayer ? "light" : "dark"} />
       <Pressable
         accessibilityHint={__DEV__ ? "Long press to reset the development demo" : undefined}
         accessibilityRole="header"
@@ -588,14 +602,14 @@ function ObjectionApp() {
         onLongPress={__DEV__ ? () => void resetDemo() : undefined}
         style={styles.brand}
       >
-        <Text style={styles.brandEyebrow}>THE HABIT COURT</Text>
-        <Text style={styles.brandName}>OBJECTION!</Text>
+        <Text style={[styles.brandEyebrow, courtLayer && styles.brandEyebrowCourt]}>THE HABIT COURT</Text>
+        <Text style={[styles.brandName, courtLayer && styles.brandNameCourt]}>OBJECTION!</Text>
       </Pressable>
       <RNAnimated.View style={[styles.scene, { opacity: sceneOpacity }]}>{renderedScreen()}</RNAnimated.View>
-      <View style={styles.bottomBar}>
-        <NavItem active={screen === "today"} icon="today" label="Today" onPress={() => switchScreen("today")} styles={styles} theme={theme} />
-        <NavItem active={screen === "ledger"} icon="ledger" label="Ledger" onPress={() => switchScreen("ledger")} styles={styles} theme={theme} />
-        <NavItem active={screen === "settings"} icon="settings" label="Settings" onPress={() => switchScreen("settings")} styles={styles} theme={theme} />
+      <View style={[styles.bottomBar, courtLayer && styles.bottomBarCourt]}>
+        <NavItem active={screen === "today"} court={courtLayer} icon="today" label="Today" onPress={() => switchScreen("today")} styles={styles} theme={theme} />
+        <NavItem active={screen === "ledger"} court={courtLayer} icon="ledger" label="Ledger" onPress={() => switchScreen("ledger")} styles={styles} theme={theme} />
+        <NavItem active={screen === "settings"} court={courtLayer} icon="settings" label="Settings" onPress={() => switchScreen("settings")} styles={styles} theme={theme} />
       </View>
       <RNAnimated.View pointerEvents="none" style={[styles.iris, { opacity: irisOpacity }]} />
     </View>
@@ -621,8 +635,9 @@ function ConnectionState({ styles, error, onRetry }: { styles: StyleSet; error: 
   );
 }
 
-function NavItem({ active, icon, label, onPress, styles, theme }: {
+function NavItem({ active, court, icon, label, onPress, styles, theme }: {
   active: boolean;
+  court: boolean;
   icon: "today" | "ledger" | "settings";
   label: string;
   onPress: () => void;
@@ -634,16 +649,18 @@ function NavItem({ active, icon, label, onPress, styles, theme }: {
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
       onPress={onPress}
-      style={[styles.navItem, active && styles.navItemActive]}
+      style={[styles.navItem, active && (court ? styles.navItemActiveCourt : styles.navItemActive)]}
     >
-      <NavGlyph active={active} kind={icon} styles={styles} theme={theme} />
-      <Text style={[styles.navLabel, active && styles.navLabelActive]}>{label}</Text>
+      <NavGlyph active={active} court={court} kind={icon} styles={styles} theme={theme} />
+      <Text style={[styles.navLabel, active && (court ? styles.navLabelActiveCourt : styles.navLabelActive)]}>{label}</Text>
     </Pressable>
   );
 }
 
-function NavGlyph({ active, kind, styles, theme }: { active: boolean; kind: "today" | "ledger" | "settings"; styles: StyleSet; theme: ThemeTokens }) {
-  const color = active ? theme.colors.primary : theme.colors.trim;
+function NavGlyph({ active, court, kind, styles, theme }: { active: boolean; court: boolean; kind: "today" | "ledger" | "settings"; styles: StyleSet; theme: ThemeTokens }) {
+  const color = active
+    ? (court ? theme.court.gold : theme.tracker.text)
+    : (court ? theme.court.textMuted : theme.tracker.textMuted);
   return (
     <Svg style={styles.navIcon} viewBox="0 0 24 24">
       {kind === "today" ? <Circle cx="12" cy="12" fill="none" r="8" stroke={color} strokeWidth={theme.layout.borderStrong} /> : null}
@@ -821,6 +838,10 @@ function ProgressGauge({ progress, reducedMotion, stakeCents, styles, theme }: {
             <Stop offset="0" stopColor={theme.colors.gaugeFill} />
             <Stop offset="1" stopColor={theme.colors.gaugeFillEnd} />
           </LinearGradient>
+          <LinearGradient id="progress-gauge-complete" x1="0" x2="1" y1="0" y2="0">
+            <Stop offset="0" stopColor={theme.tracker.accent} />
+            <Stop offset="1" stopColor={theme.tracker.accent} />
+          </LinearGradient>
         </Defs>
         <Path
           d={`M ${stroke / theme.layout.borderStrong} ${diameter / theme.layout.borderStrong} A ${radius} ${radius} 0 0 1 ${diameter - stroke / theme.layout.borderStrong} ${diameter / theme.layout.borderStrong}`}
@@ -833,7 +854,7 @@ function ProgressGauge({ progress, reducedMotion, stakeCents, styles, theme }: {
           animatedProps={animatedProps}
           d={`M ${stroke / theme.layout.borderStrong} ${diameter / theme.layout.borderStrong} A ${radius} ${radius} 0 0 1 ${diameter - stroke / theme.layout.borderStrong} ${diameter / theme.layout.borderStrong}`}
           fill="none"
-          stroke="url(#progress-gauge)"
+          stroke={target === theme.raw.opaque ? "url(#progress-gauge-complete)" : "url(#progress-gauge)"}
           strokeDasharray={`${circumference} ${circumference}`}
           strokeLinecap="round"
           strokeWidth={stroke}
@@ -850,7 +871,7 @@ function ProgressGauge({ progress, reducedMotion, stakeCents, styles, theme }: {
 function FlameGlyph({ styles, theme }: { styles: StyleSet; theme: ThemeTokens }) {
   return (
     <Svg accessibilityLabel="streak tally" height={theme.space.md} viewBox="0 0 20 20" width={theme.space.md}>
-      <Path d="M10 1 C6 6 5 8 5 11 C5 15 7 18 10 18 C14 18 16 15 16 11 C16 8 14 5 11 3 C12 7 10 8 10 10 C8 8 9 5 10 1 Z" fill="none" stroke={theme.colors.trim} strokeWidth={theme.layout.borderStrong} />
+      <Path d="M10 1 C6 6 5 8 5 11 C5 15 7 18 10 18 C14 18 16 15 16 11 C16 8 14 5 11 3 C12 7 10 8 10 10 C8 8 9 5 10 1 Z" fill="none" stroke={theme.tracker.accent} strokeWidth={theme.layout.borderStrong} />
     </Svg>
   );
 }
@@ -1524,64 +1545,70 @@ function ActionButton({ disabled = false, label, onPress, styles, variant }: {
 type StyleSet = ReturnType<typeof createStyles>;
 
 function createStyles(theme: ThemeTokens, insets: { top: number; bottom: number }) {
-  const { colors, layout, raw, space, type } = theme;
+  const { colors, court, layout, raw, space, tracker, type } = theme;
   return StyleSheet.create({
-    safeArea: { backgroundColor: colors.background, flex: raw.flexOne, paddingTop: insets.top },
+    safeArea: { backgroundColor: tracker.background, flex: raw.flexOne, paddingTop: insets.top },
+    safeAreaCourt: { backgroundColor: court.background },
     brand: { alignItems: "center", paddingHorizontal: space.lg, paddingVertical: space.md },
-    brandEyebrow: { ...type.label, color: colors.textMuted },
-    brandName: { ...type.display, color: colors.text, letterSpacing: space.xxs },
+    brandEyebrow: { ...type.label, color: tracker.textMuted },
+    brandEyebrowCourt: { color: court.gold },
+    brandName: { ...type.display, color: tracker.text, letterSpacing: space.xxs },
+    brandNameCourt: { color: court.text },
     scene: { flex: raw.flexOne },
-    bottomBar: { alignItems: "center", alignSelf: "center", backgroundColor: colors.navBar, borderColor: colors.borderSubtle, borderRadius: layout.capsuleRadius, borderWidth: layout.borderThin, flexDirection: "row", gap: space.sm, marginBottom: insets.bottom + space.md, marginTop: space.xs, paddingHorizontal: space.md, paddingVertical: space.xs },
+    bottomBar: { alignItems: "center", alignSelf: "center", backgroundColor: tracker.card, borderColor: tracker.line, borderRadius: layout.capsuleRadius, borderWidth: layout.borderThin, flexDirection: "row", gap: space.sm, marginBottom: insets.bottom + space.md, marginTop: space.xs, paddingHorizontal: space.md, paddingVertical: space.xs },
+    bottomBarCourt: { backgroundColor: court.panel, borderColor: court.line },
     navItem: { alignItems: "center", borderRadius: layout.capsuleRadius, gap: space.xxs, justifyContent: "center", minHeight: space.xxl + space.sm, minWidth: space.xxxl + space.md, paddingHorizontal: space.sm },
-    navItemActive: { backgroundColor: colors.elevated },
+    navItemActive: { backgroundColor: tracker.sunken },
+    navItemActiveCourt: { backgroundColor: court.veil },
     navIcon: { height: space.md, width: space.md },
-    navLabel: { ...type.label, color: colors.trim },
-    navLabelActive: { color: colors.primary },
-    iris: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.background },
+    navLabel: { ...type.label, color: tracker.textMuted },
+    navLabelActive: { color: tracker.text },
+    navLabelActiveCourt: { color: court.gold },
+    iris: { ...StyleSheet.absoluteFillObject, backgroundColor: court.background },
     scrollContent: { flexGrow: raw.flexOne, padding: space.lg },
     contentWrap: { alignSelf: "center", gap: space.lg, maxWidth: layout.contentMaxWidth, width: layout.contentWidth },
     centeredState: { alignItems: "center", flex: raw.flexOne, gap: space.md, justifyContent: "center", paddingHorizontal: space.xl },
     stateTitle: { ...type.section, color: colors.text, textAlign: "center" },
     stateCopy: { ...type.body, color: colors.textMuted, textAlign: "center" },
     todayHeader: { gap: space.xxs },
-    todayDate: { ...type.label, color: colors.trim },
-    todayStatus: { ...type.section, color: colors.text },
+    todayDate: { ...type.label, color: tracker.textMuted },
+    todayStatus: { ...type.section, color: tracker.text },
     gaugeWrap: { alignItems: "center", justifyContent: "center", minHeight: space.xxxl * raw.flexOne },
     gaugeCenter: { alignItems: "center", bottom: raw.zero, justifyContent: "center", left: raw.zero, position: "absolute", right: raw.zero, top: space.md },
-    gaugePercent: { ...type.display, color: colors.text },
-    gaugeCaption: { ...type.body, color: colors.textMuted },
+    gaugePercent: { ...type.numeric, color: tracker.text },
+    gaugeCaption: { ...type.body, color: tracker.textMuted },
     sectionHeading: { gap: space.xxs },
-    sectionLabel: { ...type.label, color: colors.trim },
-    sectionTitle: { ...type.section, color: colors.text },
+    sectionLabel: { ...type.label, color: tracker.textMuted },
+    sectionTitle: { ...type.section, color: tracker.text },
     habitActionGroup: { gap: space.xxs },
     habitPressable: { alignSelf: "stretch" },
-    habitCard: { alignItems: "center", backgroundColor: colors.card, borderColor: colors.borderSubtle, borderRadius: layout.cardRadius, borderWidth: layout.borderThin, flexDirection: "row", minHeight: space.xxxl + space.xs, opacity: raw.opaque, padding: space.md },
+    habitCard: { alignItems: "center", backgroundColor: tracker.card, borderColor: tracker.line, borderRadius: layout.cardRadius, borderWidth: layout.borderThin, flexDirection: "row", minHeight: space.xxxl + space.xs, opacity: raw.opaque, padding: space.md },
     habitCardComplete: { opacity: raw.subdued },
     habitCopy: { flex: raw.flexOne, gap: space.xxs },
-    habitTitle: { ...type.bodyStrong, color: colors.text },
+    habitTitle: { ...type.bodyStrong, color: tracker.text },
     habitMeta: { alignItems: "center", flexDirection: "row", gap: space.xxs },
-    habitMetaText: { ...type.label, color: colors.trim },
-    habitDeadline: { ...type.body, color: colors.textMuted },
-    habitStake: { ...type.label, color: colors.textMuted },
+    habitMetaText: { ...type.label, color: tracker.textMuted },
+    habitDeadline: { ...type.body, color: tracker.textMuted },
+    habitStake: { ...type.label, color: tracker.textMuted },
     checkTarget: { alignItems: "center", borderColor: colors.trim, borderRadius: layout.pillRadius, borderWidth: layout.borderStrong, height: space.xxl, justifyContent: "center", marginLeft: space.sm, width: space.xxl },
-    checkTargetComplete: { backgroundColor: colors.success, borderColor: colors.success },
+    checkTargetComplete: { backgroundColor: tracker.accent, borderColor: tracker.accent },
     quietAction: { alignSelf: "center", padding: space.sm },
-    quietActionText: { ...type.body, color: colors.textMuted, textDecorationLine: "underline" },
+    quietActionText: { ...type.body, color: tracker.textMuted, textDecorationLine: "underline" },
     addHabitRow: { alignItems: "center", flexDirection: "row", gap: space.sm },
-    addHabitInput: { ...type.body, backgroundColor: colors.input, borderColor: colors.borderSubtle, borderRadius: layout.controlRadius, borderWidth: layout.borderThin, color: colors.text, flex: raw.flexOne, minHeight: layout.buttonMinHeight, paddingHorizontal: space.sm },
+    addHabitInput: { ...type.body, backgroundColor: tracker.card, borderColor: tracker.line, borderRadius: layout.controlRadius, borderWidth: layout.borderThin, color: tracker.text, flex: raw.flexOne, minHeight: layout.buttonMinHeight, paddingHorizontal: space.sm },
     habitSkip: { alignSelf: "flex-start", paddingHorizontal: space.sm, paddingVertical: space.sm },
-    habitSkippedNote: { ...type.label, color: colors.textMuted },
+    habitSkippedNote: { ...type.label, color: tracker.textMuted },
     statusPanel: { gap: space.sm, paddingVertical: space.sm },
-    statusPanelTitle: { ...type.bodyStrong, color: colors.text },
-    completeReaction: { ...type.bodyStrong, color: colors.success, textAlign: "center" },
-    inlineError: { ...type.body, color: colors.textMuted, textAlign: "center" },
+    statusPanelTitle: { ...type.bodyStrong, color: tracker.text },
+    completeReaction: { ...type.bodyStrong, color: tracker.accent, textAlign: "center" },
+    inlineError: { ...type.body, color: tracker.danger, textAlign: "center" },
     noticeCard: { gap: space.xxs, paddingVertical: space.md },
-    noticeTitle: { ...type.bodyStrong, color: colors.text },
-    noticeCopy: { ...type.body, color: colors.textMuted },
-    primaryButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: colors.primary, borderRadius: layout.controlRadius, justifyContent: "center", maxWidth: layout.buttonMaxWidth, minHeight: layout.buttonMinHeight, paddingHorizontal: space.md, paddingVertical: space.sm },
-    primaryButtonText: { ...type.bodyStrong, color: colors.background },
-    secondaryButton: { alignItems: "center", alignSelf: "flex-start", borderColor: colors.textMuted, borderRadius: layout.controlRadius, borderWidth: layout.borderThin, justifyContent: "center", maxWidth: layout.buttonMaxWidth, minHeight: layout.buttonMinHeight, paddingHorizontal: space.md, paddingVertical: space.sm },
-    secondaryButtonText: { ...type.bodyStrong, color: colors.textMuted },
+    noticeTitle: { ...type.bodyStrong, color: tracker.text },
+    noticeCopy: { ...type.body, color: tracker.textMuted },
+    primaryButton: { alignItems: "center", alignSelf: "flex-start", backgroundColor: tracker.primary, borderRadius: layout.controlRadius, justifyContent: "center", maxWidth: layout.buttonMaxWidth, minHeight: layout.buttonMinHeight, paddingHorizontal: space.md, paddingVertical: space.sm },
+    primaryButtonText: { ...type.bodyStrong, color: tracker.onPrimary },
+    secondaryButton: { alignItems: "center", alignSelf: "flex-start", borderColor: colors.trim, borderRadius: layout.controlRadius, borderWidth: layout.borderThin, justifyContent: "center", maxWidth: layout.buttonMaxWidth, minHeight: layout.buttonMinHeight, paddingHorizontal: space.md, paddingVertical: space.sm },
+    secondaryButtonText: { ...type.bodyStrong, color: tracker.text },
     buttonInactive: { opacity: raw.inactive },
     courtKeyboard: { flex: raw.flexOne },
     courtRoot: { flex: raw.flexOne, gap: space.sm, padding: space.md },

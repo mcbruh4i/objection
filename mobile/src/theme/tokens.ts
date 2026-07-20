@@ -2,48 +2,100 @@ import { useMemo } from "react";
 import { useWindowDimensions } from "react-native";
 
 /**
- * Courtroom Noir is deliberately split into raw pigment names and semantic
- * roles. UI code consumes only `colors`, so a palette change remains local to
- * this file.
+ * Objection! design system — two layers, one file.
+ *
+ * Layer 1 · Tracker (calm, daily use): parchment canvas, courtroom-navy ink,
+ * Space Grotesk type. Judicial gold is reserved for streaks and achievements.
+ * Layer 2 · Courtroom (dramatic): courtroom-navy canvas, bench-navy panels,
+ * Anton all-caps display, prosecutor red vs defense blue, high contrast.
+ *
+ * UI code consumes the semantic maps (`tracker`, `court`), so a palette
+ * change stays local to this file. `colors` is the legacy map kept so
+ * not-yet-restyled screens keep compiling during the screen-by-screen pass.
  */
-export const rawColors = {
-  bg0: "#F4EBD9",
-  bg1: "#FBF5E8",
-  surface: "#FFFDF4",
-  beige: "#ECDFC3",
-  woodLight: "#A97F52",
-  woodLine: "#E0D1B2",
-  primary: "#7E2334",
-  primarySoft: "#5E1723",
-  creamBright: "#FFF6E1",
-  creamDeep: "#EFDCB3",
-  gaugeTrack: "#DDC79F",
-  ink: "#3C2A20",
-  inkMuted: "#8B7A5E",
-  danger: "#C7483A",
-  ok: "#3F7D54",
+export const palette = {
+  parchment: "#F3ECD9",
+  courtroomNavy: "#16213C",
+  benchNavy: "#24345A",
+  judicialGold: "#C9A227",
+  gallerySlate: "#93A0BB",
+  railNavy: "#3B4C74",
+  prosecutorRed: "#E05141",
+  defenseBlue: "#5B8DEF",
 } as const;
 
+/** Tints derived from the registered palette — no new hues. */
+const tints = {
+  parchmentRaised: "#FBF6E8",
+  navyWhisper: "rgba(22, 33, 60, 0.06)",
+  navyTrack: "rgba(22, 33, 60, 0.12)",
+  navyLine: "rgba(22, 33, 60, 0.18)",
+  navySoft: "rgba(22, 33, 60, 0.62)",
+  goldSoft: "rgba(201, 162, 39, 0.18)",
+  parchmentVeil: "rgba(243, 236, 217, 0.08)",
+} as const;
+
+export const fonts = {
+  body: "SpaceGrotesk_400Regular",
+  bodyMedium: "SpaceGrotesk_500Medium",
+  bodyStrong: "SpaceGrotesk_700Bold",
+  display: "Anton_400Regular",
+} as const;
+
+/** Layer 1 — the calm tracker. Gold appears only on streaks/achievements. */
+export const tracker = {
+  background: palette.parchment,
+  card: tints.parchmentRaised,
+  sunken: tints.navyWhisper,
+  line: tints.navyLine,
+  text: palette.courtroomNavy,
+  textMuted: tints.navySoft,
+  primary: palette.courtroomNavy,
+  onPrimary: palette.parchment,
+  accent: palette.judicialGold,
+  accentSoft: tints.goldSoft,
+  gaugeTrack: tints.navyTrack,
+  danger: "#B23A2E",
+} as const;
+
+/** Layer 2 — the dramatic courtroom. */
+export const court = {
+  background: palette.courtroomNavy,
+  panel: palette.benchNavy,
+  line: palette.railNavy,
+  text: palette.parchment,
+  textMuted: palette.gallerySlate,
+  gold: palette.judicialGold,
+  prosecutor: palette.prosecutorRed,
+  defense: palette.defenseBlue,
+  veil: tints.parchmentVeil,
+} as const;
+
+/**
+ * Legacy semantic map. Values point at the tracker layer so screens that
+ * have not been restyled yet stay calm and readable; each screen is being
+ * repointed to `tracker`/`court` explicitly as the redesign lands.
+ */
 export const colors = {
-  background: rawColors.bg0,
-  card: rawColors.bg1,
-  elevated: rawColors.surface,
-  navBar: rawColors.beige,
-  trim: rawColors.woodLight,
-  borderSubtle: rawColors.woodLine,
-  primary: rawColors.primary,
-  primaryPressed: rawColors.primarySoft,
-  gaugeTrack: rawColors.gaugeTrack,
-  gaugeFill: rawColors.creamBright,
-  gaugeFillEnd: rawColors.creamDeep,
-  text: rawColors.ink,
-  textMuted: rawColors.inkMuted,
-  input: rawColors.surface,
-  success: rawColors.ok,
-  objection: rawColors.danger,
-  fine: rawColors.danger,
-  rejected: rawColors.danger,
-  flash: rawColors.surface,
+  background: tracker.background,
+  card: tracker.card,
+  elevated: tracker.card,
+  navBar: tracker.card,
+  trim: palette.railNavy,
+  borderSubtle: tracker.line,
+  primary: tracker.primary,
+  primaryPressed: palette.benchNavy,
+  gaugeTrack: tracker.gaugeTrack,
+  gaugeFill: palette.courtroomNavy,
+  gaugeFillEnd: palette.benchNavy,
+  text: tracker.text,
+  textMuted: tracker.textMuted,
+  input: tracker.card,
+  success: palette.judicialGold,
+  objection: palette.prosecutorRed,
+  fine: palette.prosecutorRed,
+  rejected: palette.prosecutorRed,
+  flash: palette.parchment,
 } as const;
 
 const raw = {
@@ -129,47 +181,59 @@ export function createThemeTokens(width: number) {
   const bodySize = unit;
   const type = {
     body: {
+      fontFamily: fonts.body,
       fontSize: bodySize,
       lineHeight: bodySize + space.xs,
-      fontWeight: "400" as const,
     },
     bodyStrong: {
+      fontFamily: fonts.bodyStrong,
       fontSize: bodySize,
       lineHeight: bodySize + space.xs,
-      fontWeight: "700" as const,
     },
     label: {
+      fontFamily: fonts.bodyStrong,
       fontSize: bodySize * 0.78,
       lineHeight: bodySize,
-      fontWeight: "800" as const,
-      letterSpacing: space.xxs / 2,
+      letterSpacing: space.xxs,
+      textTransform: "uppercase" as const,
     },
     section: {
+      fontFamily: fonts.bodyStrong,
       fontSize: bodySize * 1.55,
       lineHeight: bodySize * 1.55 + space.xs,
-      fontWeight: "900" as const,
     },
     title: {
+      fontFamily: fonts.bodyStrong,
       fontSize: bodySize * 1.78,
       lineHeight: bodySize * 1.78 + space.sm,
-      fontWeight: "900" as const,
     },
-    display: {
+    numeric: {
+      fontFamily: fonts.bodyStrong,
       fontSize: bodySize * 2.45,
       lineHeight: bodySize * 2.45 + space.sm,
-      fontWeight: "900" as const,
-      letterSpacing: space.xxs / 2,
+      fontVariant: ["tabular-nums"] as "tabular-nums"[],
+    },
+    display: {
+      fontFamily: fonts.display,
+      fontSize: bodySize * 2.45,
+      lineHeight: bodySize * 2.45 + space.sm,
+      letterSpacing: space.xxs,
+      textTransform: "uppercase" as const,
     },
     verdict: {
+      fontFamily: fonts.display,
       fontSize: bodySize * 2.05,
       lineHeight: bodySize * 2.05 + space.sm,
-      fontWeight: "900" as const,
       letterSpacing: space.xxs,
+      textTransform: "uppercase" as const,
     },
   } as const;
 
   return {
     colors,
+    tracker,
+    court,
+    fonts,
     raw,
     unit,
     width,
