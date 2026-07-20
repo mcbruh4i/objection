@@ -1190,6 +1190,21 @@ function Courtroom({
           ? verdict?.reasoning ?? "The court has reached a ruling."
           : "";
   const dialogueSpeaker = mode === "plea" ? "defense" : mode === "verdict" ? "judge" : "prosecutor";
+  const nameplateTone = dialogueSpeaker === "defense"
+    ? styles.nameplateDefense
+    : dialogueSpeaker === "prosecutor"
+      ? styles.nameplateProsecutor
+      : styles.nameplateJudge;
+  const dialogueTone = dialogueSpeaker === "defense"
+    ? styles.dialogueBoxDefense
+    : dialogueSpeaker === "prosecutor"
+      ? styles.dialogueBoxProsecutor
+      : styles.dialogueBoxJudge;
+  const tailTone = dialogueSpeaker === "defense"
+    ? styles.dialogueTailDefense
+    : dialogueSpeaker === "prosecutor"
+      ? styles.dialogueTailProsecutor
+      : styles.dialogueTailJudge;
   const typewriter = useTypewriter(dialogue, active && !frozen && mode !== "objection" && mode !== "deliberating", reducedMotion, theme, dialogueSpeaker, playSound);
 
   useEffect(() => setDialogueComplete(typewriter.complete), [typewriter.complete]);
@@ -1216,6 +1231,10 @@ function Courtroom({
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.courtKeyboard}>
       <View pointerEvents={active ? "auto" : "none"} style={styles.courtRoot}>
         <RNAnimated.View style={[styles.videoStage, { transform: [{ translateX: stageShake }] }]}>
+          <View pointerEvents="none" style={styles.courtStageHeader}>
+            <Text style={styles.courtStageLabel}>DAILY COURT / LIVE RECORD</Text>
+            <Text style={styles.courtStageMode}>{mode === "verdict" ? "RULING" : "IN SESSION"}</Text>
+          </View>
           {([0, 1] as PlayerIndex[]).map((index) => (
             <Video
               key={index}
@@ -1243,11 +1262,16 @@ function Courtroom({
           ) : null}
           {frozen ? <View pointerEvents="none" style={styles.frozenVeil} /> : null}
         </RNAnimated.View>
-        <View style={styles.nameplate}><Text style={styles.nameplateText}>{speaker}</Text></View>
-        <Pressable accessibilityRole="button" onPress={typewriter.finish} style={styles.dialogueBox}>
-          <Text style={styles.dialogueText}>{typewriter.text}</Text>
-          {mode !== "deliberating" && mode !== "objection" ? <Text style={styles.advanceHint}>▼</Text> : null}
-        </Pressable>
+        <View style={styles.dialogueCluster}>
+          <View style={[styles.nameplate, nameplateTone]}>
+            <Text style={[styles.nameplateText, dialogueSpeaker !== "defense" && styles.nameplateTextOnColor]}>{speaker}</Text>
+          </View>
+          <Pressable accessibilityRole="button" onPress={typewriter.finish} style={[styles.dialogueBox, dialogueTone]}>
+            <Text style={styles.dialogueText}>{typewriter.text}</Text>
+            {mode !== "deliberating" && mode !== "objection" ? <Text style={styles.advanceHint}>▼</Text> : null}
+            <View pointerEvents="none" style={[styles.dialogueTail, tailTone]} />
+          </Pressable>
+        </View>
         {showInput ? (
           <View style={styles.courtInputRow}>
             <TextInput
@@ -1256,7 +1280,7 @@ function Courtroom({
               onChangeText={mode === "plea" ? setPlea : setRebuttal}
               onSubmitEditing={mode === "plea" ? () => void submitPlea() : () => void submitRebuttal()}
               placeholder={mode === "plea" ? "State your plea" : "Add relevant detail"}
-              placeholderTextColor={theme.colors.textMuted}
+              placeholderTextColor={theme.court.textMuted}
               returnKeyType="send"
               style={styles.courtInput}
               value={mode === "plea" ? plea : rebuttal}
@@ -1278,7 +1302,7 @@ function Courtroom({
 function SpeedLines({ styles, theme }: { styles: StyleSet; theme: ThemeTokens }) {
   return (
     <Svg pointerEvents="none" style={styles.speedLines} viewBox="0 0 100 100">
-      {[10, 22, 34, 48, 62, 76].map((position) => <Line key={position} stroke={theme.colors.trim} strokeOpacity={theme.raw.subdued} strokeWidth={theme.layout.borderThin} x1="0" x2="100" y1={position} y2={position - theme.space.xs} />)}
+      {[10, 22, 34, 48, 62, 76].map((position) => <Line key={position} stroke={theme.court.defense} strokeOpacity={theme.raw.subdued} strokeWidth={theme.layout.borderThin} x1="0" x2="100" y1={position} y2={position - theme.space.xs} />)}
     </Svg>
   );
 }
@@ -1292,14 +1316,14 @@ function JudgeVerdict({ fine, rejected, stampRotate, stampScale, styles, theme, 
   theme: ThemeTokens;
   verdict: JudgeVerdict;
 }) {
-  const verdictColor = rejected ? theme.colors.rejected : theme.colors.success;
+  const verdictColor = rejected ? theme.court.prosecutor : theme.court.gold;
   return (
     <View style={styles.judgeOverlay}>
       <View style={styles.judgePortrait}>
         <Svg height={theme.space.xxl} viewBox="0 0 64 64" width={theme.space.xxl}>
-          <Circle cx="32" cy="20" fill="none" r="12" stroke={theme.colors.trim} strokeWidth={theme.layout.borderStrong} />
-          <Path d="M 12 56 C 16 38 48 38 52 56" fill="none" stroke={theme.colors.trim} strokeWidth={theme.layout.borderStrong} />
-          <Line stroke={theme.colors.trim} strokeWidth={theme.layout.borderStrong} x1="22" x2="42" y1="12" y2="12" />
+          <Circle cx="32" cy="20" fill="none" r="12" stroke={theme.court.line} strokeWidth={theme.layout.borderStrong} />
+          <Path d="M 12 56 C 16 38 48 38 52 56" fill="none" stroke={theme.court.line} strokeWidth={theme.layout.borderStrong} />
+          <Line stroke={theme.court.line} strokeWidth={theme.layout.borderStrong} x1="22" x2="42" y1="12" y2="12" />
         </Svg>
         <Text style={styles.judgePortraitText}>THE JUDGE</Text>
       </View>
@@ -1307,7 +1331,7 @@ function JudgeVerdict({ fine, rejected, stampRotate, stampScale, styles, theme, 
         <Text style={[styles.verdictStampText, { color: verdictColor }]}>{rejected ? "REJECTED" : "ACCEPTED"}</Text>
       </RNAnimated.View>
       <Text style={styles.verdictReason}>{verdict.reasoning}</Text>
-      <Text style={[styles.verdictFine, { color: rejected ? theme.colors.fine : theme.colors.success }]}>{formatMockCents(fine?.amount_cents ?? theme.raw.transparent)}</Text>
+      <Text style={[styles.verdictFine, { color: rejected ? theme.court.prosecutor : theme.court.gold }]}>{formatMockCents(fine?.amount_cents ?? theme.raw.transparent)}</Text>
       {verdict.evidence_required ? <Text style={styles.verdictNote}>A similar future plea needs specific, consistent detail.</Text> : null}
     </View>
   );
@@ -1611,32 +1635,47 @@ function createStyles(theme: ThemeTokens, insets: { top: number; bottom: number 
     secondaryButtonText: { ...type.bodyStrong, color: tracker.text },
     buttonInactive: { opacity: raw.inactive },
     courtKeyboard: { flex: raw.flexOne },
-    courtRoot: { flex: raw.flexOne, gap: space.sm, padding: space.md },
-    videoStage: { alignSelf: "center", aspectRatio: theme.media.videoAspectRatio, backgroundColor: colors.background, maxWidth: layout.contentMaxWidth, overflow: "hidden", width: raw.full },
+    courtRoot: { backgroundColor: court.background, flex: raw.flexOne, gap: space.sm, padding: space.md },
+    videoStage: { alignSelf: "center", aspectRatio: theme.media.videoAspectRatio, backgroundColor: court.background, borderColor: court.line, borderRadius: layout.cardRadius, borderWidth: layout.borderThin, maxWidth: layout.contentMaxWidth, overflow: "hidden", width: raw.full },
+    courtStageHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", left: space.md, position: "absolute", right: space.md, top: space.md, zIndex: layout.borderStrong },
+    courtStageLabel: { ...type.label, color: court.textMuted },
+    courtStageMode: { ...type.label, color: court.gold },
     videoPlayer: { ...StyleSheet.absoluteFillObject },
     videoVisible: { opacity: raw.opaque },
     videoHidden: { opacity: raw.transparent },
-    vignette: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.background, opacity: space.xxs / space.xxxl },
+    vignette: { ...StyleSheet.absoluteFillObject, backgroundColor: court.background, opacity: space.xxs / space.xxxl },
     speedLines: { ...StyleSheet.absoluteFillObject, opacity: raw.subdued },
-    flash: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.flash, opacity: raw.opaque },
-    frozenVeil: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.background, opacity: space.xxs / space.xxxl },
+    flash: { ...StyleSheet.absoluteFillObject, backgroundColor: court.text, opacity: raw.opaque },
+    frozenVeil: { ...StyleSheet.absoluteFillObject, backgroundColor: court.background, opacity: space.xxs / space.xxxl },
     splashWrap: { alignSelf: "center", bottom: raw.zero, justifyContent: "center", position: "absolute", top: raw.zero, width: raw.full },
     splashImage: { aspectRatio: theme.media.videoAspectRatio, height: raw.full, width: raw.full },
-    nameplate: { alignSelf: "flex-start", backgroundColor: colors.elevated, borderColor: colors.trim, borderRadius: layout.controlRadius, borderWidth: layout.borderThin, marginLeft: space.sm, marginTop: -space.xl, paddingHorizontal: space.sm, paddingVertical: space.xxs },
-    nameplateText: { ...type.label, color: colors.text },
-    dialogueBox: { backgroundColor: colors.elevated, borderColor: colors.trim, borderRadius: layout.cardRadius, borderWidth: layout.borderThin, minHeight: space.xxxl, padding: space.md },
-    dialogueText: { ...type.body, color: colors.text },
-    advanceHint: { ...type.label, color: colors.trim, marginTop: space.xs, textAlign: "right" },
-    courtInputRow: { alignItems: "center", flexDirection: "row", gap: space.sm },
-    courtInput: { ...type.body, backgroundColor: colors.input, borderColor: colors.trim, borderRadius: layout.controlRadius, borderWidth: layout.borderThin, color: colors.text, flex: raw.flexOne, minHeight: layout.inputMinHeight, paddingHorizontal: space.sm },
-    judgeOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", backgroundColor: colors.elevated, gap: space.sm, justifyContent: "center", padding: space.lg },
+    dialogueCluster: { position: "relative", zIndex: layout.borderStrong },
+    nameplate: { alignSelf: "flex-start", backgroundColor: court.panel, borderColor: court.line, borderRadius: layout.controlRadius, borderWidth: layout.borderThin, marginBottom: -space.xs, marginLeft: space.sm, paddingHorizontal: space.sm, paddingVertical: space.xxs, zIndex: layout.borderStrong },
+    nameplateDefense: { borderColor: court.defense },
+    nameplateProsecutor: { backgroundColor: court.prosecutor, borderColor: court.prosecutor },
+    nameplateJudge: { backgroundColor: court.gold, borderColor: court.gold },
+    nameplateText: { ...type.label, color: court.text, fontFamily: theme.fonts.display, letterSpacing: space.xxs },
+    nameplateTextOnColor: { color: court.background },
+    dialogueBox: { backgroundColor: court.panel, borderColor: court.line, borderRadius: layout.cardRadius, borderWidth: layout.borderThin, minHeight: space.xxxl, padding: space.md, paddingTop: space.lg },
+    dialogueBoxDefense: { borderColor: court.defense },
+    dialogueBoxProsecutor: { borderColor: court.prosecutor },
+    dialogueBoxJudge: { borderColor: court.gold },
+    dialogueTail: { backgroundColor: court.panel, borderBottomColor: court.line, borderBottomWidth: layout.borderThin, borderRightColor: court.line, borderRightWidth: layout.borderThin, bottom: -space.xs, height: space.sm, position: "absolute", transform: [{ rotate: "45deg" }], width: space.sm },
+    dialogueTailDefense: { borderBottomColor: court.defense, borderRightColor: court.defense, left: space.lg },
+    dialogueTailProsecutor: { borderBottomColor: court.prosecutor, borderRightColor: court.prosecutor, right: space.lg },
+    dialogueTailJudge: { borderBottomColor: court.gold, borderRightColor: court.gold, right: space.lg },
+    dialogueText: { ...type.bodyStrong, color: court.text },
+    advanceHint: { ...type.label, color: court.gold, marginTop: space.xs, textAlign: "right" },
+    courtInputRow: { alignItems: "center", backgroundColor: court.panel, borderColor: court.line, borderRadius: layout.cardRadius, borderWidth: layout.borderThin, flexDirection: "row", gap: space.sm, padding: space.xs },
+    courtInput: { ...type.body, backgroundColor: court.background, borderColor: court.line, borderRadius: layout.controlRadius, borderWidth: layout.borderThin, color: court.text, flex: raw.flexOne, minHeight: layout.inputMinHeight, paddingHorizontal: space.sm },
+    judgeOverlay: { ...StyleSheet.absoluteFillObject, alignItems: "center", backgroundColor: court.panel, gap: space.sm, justifyContent: "center", padding: space.lg },
     judgePortrait: { alignItems: "center", gap: space.xxs },
-    judgePortraitText: { ...type.label, color: colors.trim },
+    judgePortraitText: { ...type.label, color: court.textMuted },
     verdictStamp: { borderRadius: layout.controlRadius, borderWidth: layout.borderStrong, paddingHorizontal: space.lg, paddingVertical: space.sm },
     verdictStampText: { ...type.verdict },
-    verdictReason: { ...type.bodyStrong, color: colors.text, textAlign: "center" },
+    verdictReason: { ...type.bodyStrong, color: court.text, textAlign: "center" },
     verdictFine: { ...type.display },
-    verdictNote: { ...type.body, color: colors.textMuted, textAlign: "center" },
+    verdictNote: { ...type.body, color: court.textMuted, textAlign: "center" },
     ledgerHero: { backgroundColor: colors.card, borderRadius: layout.cardRadius, gap: space.xxs, padding: space.lg },
     ledgerHeroLabel: { ...type.label, color: colors.textMuted },
     ledgerHeroAmount: { ...type.display, color: colors.text },
