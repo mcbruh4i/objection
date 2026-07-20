@@ -734,9 +734,9 @@ function TodayScreen({
             key={habit.id}
             completed={isDone(habit)}
             deadline={formatDeadline(habit.deadline_at)}
-            disabled={Boolean(pendingAction) || sessionOpen || habit.status === "skipped"}
+            disabled={Boolean(pendingAction) || habit.status === "skipped"}
             onComplete={() => onComplete(habit.id)}
-            onSkip={!isDone(habit) && !sessionOpen && habit.status !== "skipped" ? () => onOpenCourt(habit.id) : null}
+            onSkip={!isDone(habit) && habit.status !== "skipped" ? () => onOpenCourt(habit.id) : null}
             penalty={formatMockCents(habit.penalty_cents)}
             skipped={habit.status === "skipped"}
             styles={styles}
@@ -1223,7 +1223,7 @@ function Courtroom({
     }
     await onSubmitRebuttal(rebuttal);
   };
-  const showInput = active && (mode === "plea" || mode === "rebuttal") && dialogueComplete && !frozen;
+  const showInput = active && (mode === "plea" || mode === "rebuttal") && !frozen;
   const rejected = verdict?.verdict === "rejected";
   const stampRotate = stampRotation.interpolate({ inputRange: [theme.raw.transparent, theme.raw.opaque], outputRange: [theme.raw.objectionRotation, theme.raw.noRotation] });
 
