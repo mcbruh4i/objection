@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.database import connection_for
+from app.database import connection_for, initialize_database
 from app.main import create_app
 
 
@@ -85,3 +85,63 @@ def test_cors_accepts_expo_localhost(tmp_path: Path) -> None:
         )
         assert response.status_code == 200
         assert response.headers["access-control-allow-origin"] == "http://localhost:8082"
+
+
+def test_existing_sessions_gain_transcript_columns_without_data_loss(tmp_path: Path) -> None:
+    database_path = tmp_path / "court-session-migration.db"
+    with connection_for(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE habits (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                minutes INTEGER NOT NULL,
+                deadline_at TEXT NOT NULL,
+                penalty_cents INTEGER NOT NULL,
+                status TEXT NOT NULL
+            );
+            CREATE TABLE fines (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL UNIQUE,
+                amount_cents INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE court_sessions (
+                id TEXT PRIMARY KEY,
+                habit_id TEXT NOT NULL,
+                state TEXT NOT NULL,
+                plea TEXT,
+                normalized_plea TEXT,
+                plea_category TEXT,
+                prosecutor_json TEXT,
+                rebuttal TEXT,
+                verdict_json TEXT,
+                prosecutor_source TEXT,
+                judge_source TEXT,
+                created_at TEXT NOT NULL,
+                resolved_at TEXT
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO habits VALUES (?, ?, ?, ?, ?, ?)",
+            ("existing-habit", "Existing habit", 30, "2026-07-21T20:00:00+00:00", 200, "skipped"),
+        )
+        connection.execute(
+            "INSERT INTO court_sessions (id, habit_id, state, created_at) VALUES (?, ?, ?, ?)",
+            ("existing-session", "existing-habit", "awaiting_plea", "2026-07-21T10:00:00+00:00"),
+        )
+
+    initialize_database(database_path)
+
+    with connection_for(database_path) as connection:
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(court_sessions)")}
+        session = connection.execute(
+            "SELECT id, transcript_json, turn_count FROM court_sessions WHERE id = ?", ("existing-session",)
+        ).fetchone()
+
+    assert {"transcript_json", "turn_count"}.issubset(columns)
+    assert session["id"] == "existing-session"
+    assert session["transcript_json"] == "[]"
+    assert session["turn_count"] == 0

@@ -17,6 +17,7 @@ from .court import evaluate_policy, judge_response, normalize_reason, prosecutor
 from .database import configured_database_path, connection_for, initialize_database, reset_database, utc_now
 from .llm import LLMAdapter
 from .schemas import (
+    ContinuingRebuttalResponse,
     DemoResetResponse,
     FineResponse,
     HabitCreate,
@@ -27,6 +28,7 @@ from .schemas import (
     PleaResponse,
     ProsecutorResponse,
     RebuttalResponse,
+    ResolvedRebuttalResponse,
     SessionSummary,
     SkipResponse,
     TextSubmission,
@@ -34,6 +36,7 @@ from .schemas import (
 )
 
 MAX_HABITS_PER_DAY = 20
+MAX_TURNS = 50
 
 
 class SessionStageSingleFlight:
@@ -147,6 +150,62 @@ def _memory_payload(memories: list[sqlite3.Row]) -> list[dict[str, str]]:
     return [{"reason": row["normalized_reason"], "category": row["category"]} for row in memories]
 
 
+def _transcript_entry(*, speaker: str, kind: str, text: str) -> dict[str, str]:
+    return {"speaker": speaker, "kind": kind, "text": text}
+
+
+def _prosecutor_transcript_entry(prosecutor: ProsecutorResponse) -> dict[str, str]:
+    return _transcript_entry(
+        speaker="prosecutor",
+        kind="challenge",
+        text=json.dumps(
+            {
+                "objection": prosecutor.objection,
+                "challenge": prosecutor.challenge,
+                "question": prosecutor.question,
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+
+def _session_transcript(session: sqlite3.Row) -> list[dict[str, str]]:
+    raw_transcript = session["transcript_json"] if "transcript_json" in session.keys() else None
+    if raw_transcript:
+        try:
+            parsed = json.loads(raw_transcript)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            entries = [
+                _transcript_entry(speaker=item["speaker"], kind=item["kind"], text=item["text"])
+                for item in parsed
+                if isinstance(item, dict)
+                and item.get("speaker") in {"defense", "prosecutor"}
+                and isinstance(item.get("kind"), str)
+                and isinstance(item.get("text"), str)
+            ]
+            if entries:
+                return entries
+
+    entries: list[dict[str, str]] = []
+    if session["plea"]:
+        entries.append(_transcript_entry(speaker="defense", kind="plea", text=session["plea"]))
+    if session["prosecutor_json"]:
+        try:
+            entries.append(_prosecutor_transcript_entry(ProsecutorResponse.model_validate(json.loads(session["prosecutor_json"]))))
+        except (TypeError, ValueError):
+            pass
+    if session["rebuttal"]:
+        entries.append(_transcript_entry(speaker="defense", kind="rebuttal", text=session["rebuttal"]))
+    return entries
+
+
+def _turn_count(session: sqlite3.Row) -> int:
+    value = session["turn_count"] if "turn_count" in session.keys() else 0
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
 def _reason_for(verdict: JudgeVerdict, source: Literal["live", "fallback", "absentia"]) -> str:
     if source == "absentia":
         return "Court issued a default absentia ruling after the Judge call failed."
@@ -180,9 +239,10 @@ def _resolved_response(database_path: Path, session_id: str) -> RebuttalResponse
         ).fetchone()
     if session is None or session["state"] != "resolved" or session["verdict_json"] is None or fine is None:
         raise HTTPException(status_code=409, detail="The verdict is not available yet.")
-    return RebuttalResponse(
+    return ResolvedRebuttalResponse(
         session_id=session_id,
         state="resolved",
+        should_rule=True,
         verdict=JudgeVerdict.model_validate(json.loads(session["verdict_json"])),
         fine=_fine_from_row(fine),
         source=session["judge_source"] if session["judge_source"] in {"live", "fallback", "absentia"} else "fallback",
@@ -349,7 +409,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                         """
                         UPDATE court_sessions
                         SET state = 'awaiting_rebuttal', plea = ?, normalized_plea = ?, plea_category = ?,
-                            prosecutor_json = ?, prosecutor_source = ?
+                            prosecutor_json = ?, prosecutor_source = ?, transcript_json = ?, turn_count = 0
                         WHERE id = ?
                         """,
                         (
@@ -358,6 +418,13 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                             policy.category,
                             json.dumps(prosecutor.model_dump()),
                             source,
+                            json.dumps(
+                                [
+                                    _transcript_entry(speaker="defense", kind="plea", text=body.text),
+                                    _prosecutor_transcript_entry(prosecutor),
+                                ],
+                                ensure_ascii=False,
+                            ),
                             session_id,
                         ),
                     )
@@ -383,20 +450,77 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 raise HTTPException(status_code=409, detail="The plea must be heard before a rebuttal.")
 
             memory_payload = _memory_payload(memories)
+            turn_count = _turn_count(session)
+            next_turn = turn_count + 1
+            transcript = [
+                *_session_transcript(session),
+                _transcript_entry(speaker="defense", kind="rebuttal", text=body.text),
+            ]
             policy = evaluate_policy(session["plea"], [row["normalized_reason"] for row in memories], body.text)
-            verdict, source = judge_response(
+            verdict, judge_source = judge_response(
                 adapter=adapter,
                 habit_title=habit["title"],
                 plea=session["plea"],
                 rebuttal=body.text,
                 memories=memory_payload,
                 policy=policy,
+                transcript=transcript,
+                force_rule=next_turn >= MAX_TURNS,
             )
+
+            if not verdict.should_rule:
+                prosecutor, prosecutor_source = prosecutor_response(
+                    adapter=adapter,
+                    habit_title=habit["title"],
+                    plea=session["plea"],
+                    memories=memory_payload,
+                    policy=policy,
+                    transcript=transcript,
+                )
+                continued_transcript = [*transcript, _prosecutor_transcript_entry(prosecutor)]
+                with connection_for(path) as connection:
+                    connection.execute("BEGIN IMMEDIATE")
+                    try:
+                        current = connection.execute("SELECT state FROM court_sessions WHERE id = ?", (session_id,)).fetchone()
+                        if current is None:
+                            raise HTTPException(status_code=404, detail="Court session not found.")
+                        if current["state"] == "resolved":
+                            connection.rollback()
+                            return _resolved_response(path, session_id)
+                        if current["state"] != "awaiting_rebuttal":
+                            raise HTTPException(status_code=409, detail="The plea must be heard before a rebuttal.")
+                        connection.execute(
+                            """
+                            UPDATE court_sessions
+                            SET rebuttal = ?, prosecutor_json = ?, prosecutor_source = ?, transcript_json = ?, turn_count = ?
+                            WHERE id = ?
+                            """,
+                            (
+                                body.text,
+                                json.dumps(prosecutor.model_dump()),
+                                prosecutor_source,
+                                json.dumps(continued_transcript, ensure_ascii=False),
+                                next_turn,
+                                session_id,
+                            ),
+                        )
+                        connection.commit()
+                    except Exception:
+                        connection.rollback()
+                        raise
+                return ContinuingRebuttalResponse(
+                    session_id=session_id,
+                    state="awaiting_rebuttal",
+                    should_rule=False,
+                    prosecutor=prosecutor,
+                    source=prosecutor_source,
+                )
+
             amount_cents = _amount_cents(habit["penalty_cents"], verdict)
             fine = FineResponse(
                 id=str(uuid.uuid4()),
                 amount_cents=amount_cents,
-                reason=_reason_for(verdict, source),
+                reason=_reason_for(verdict, judge_source),
                 created_at=utc_now(),
             )
 
@@ -422,10 +546,19 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                     connection.execute(
                         """
                         UPDATE court_sessions
-                        SET state = 'resolved', rebuttal = ?, verdict_json = ?, judge_source = ?, resolved_at = ?
+                        SET state = 'resolved', rebuttal = ?, transcript_json = ?, turn_count = ?,
+                            verdict_json = ?, judge_source = ?, resolved_at = ?
                         WHERE id = ?
                         """,
-                        (body.text, json.dumps(verdict.model_dump()), source, utc_now(), session_id),
+                        (
+                            body.text,
+                            json.dumps(transcript, ensure_ascii=False),
+                            next_turn,
+                            json.dumps(verdict.model_dump()),
+                            judge_source,
+                            utc_now(),
+                            session_id,
+                        ),
                     )
                     if policy.category != "injection":
                         connection.execute(
@@ -439,7 +572,14 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 except Exception:
                     connection.rollback()
                     raise
-            return RebuttalResponse(session_id=session_id, state="resolved", verdict=verdict, fine=fine, source=source)
+            return ResolvedRebuttalResponse(
+                session_id=session_id,
+                state="resolved",
+                should_rule=True,
+                verdict=verdict,
+                fine=fine,
+                source=judge_source,
+            )
 
     @app.get("/ledger", response_model=LedgerResponse)
     def get_ledger() -> LedgerResponse:

@@ -55,6 +55,15 @@ def _legacy_schema_present(connection: sqlite3.Connection) -> bool:
     return "deadline_at" not in habit_columns or "penalty_cents" not in habit_columns or "amount_cents" not in fine_columns
 
 
+def _ensure_court_session_columns(connection: sqlite3.Connection) -> None:
+    """Apply additive, data-preserving upgrades to the local court record."""
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(court_sessions)").fetchall()}
+    if "transcript_json" not in columns:
+        connection.execute("ALTER TABLE court_sessions ADD COLUMN transcript_json TEXT NOT NULL DEFAULT '[]'")
+    if "turn_count" not in columns:
+        connection.execute("ALTER TABLE court_sessions ADD COLUMN turn_count INTEGER NOT NULL DEFAULT 0")
+
+
 def initialize_database(database_path: Path) -> None:
     with connection_for(database_path) as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -100,6 +109,8 @@ def initialize_database(database_path: Path) -> None:
                     plea_category TEXT,
                     prosecutor_json TEXT,
                     rebuttal TEXT,
+                    transcript_json TEXT NOT NULL DEFAULT '[]',
+                    turn_count INTEGER NOT NULL DEFAULT 0,
                     verdict_json TEXT,
                     prosecutor_source TEXT,
                     judge_source TEXT,
@@ -120,6 +131,7 @@ def initialize_database(database_path: Path) -> None:
                 );
                 """
             )
+            _ensure_court_session_columns(connection)
             habit = connection.execute("SELECT id FROM habits WHERE id = ?", (SEED_HABIT_ID,)).fetchone()
             if habit is None:
                 seed_database(connection)

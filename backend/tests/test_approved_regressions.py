@@ -36,6 +36,7 @@ def test_emotion_defaults_support_older_saved_court_records() -> None:
 
     assert prosecutor.emotion == "idle"
     assert verdict.judge_emotion == "neutral"
+    assert verdict.should_rule is True
 
 
 class _MissingEmotionAdapter:
@@ -67,7 +68,8 @@ class _MissingEmotionAdapter:
         )
 
 
-def test_missing_live_emotion_tags_keep_the_existing_fallback_behavior() -> None:
+def test_missing_live_emotion_tags_keep_the_existing_fallback_behavior(caplog) -> None:
+    caplog.set_level("WARNING", logger="app.court")
     policy = evaluate_policy("The train was unexpectedly delayed.", ())
     adapter = _MissingEmotionAdapter()
 
@@ -91,6 +93,9 @@ def test_missing_live_emotion_tags_keep_the_existing_fallback_behavior() -> None
     assert prosecutor.emotion == "attentive"
     assert judge_source == "absentia"
     assert judge.judge_emotion == "unavailable"
+    assert "LLM prosecutor fallback activated" in caplog.text
+    assert "LLM judge fallback activated" in caplog.text
+    assert "error_type=ResponseRejected" in caplog.text
 
 
 def test_daily_habit_limit_allows_twenty_then_rejects_the_twenty_first(
@@ -203,6 +208,7 @@ class _BlockingAdapter:
                 verdict="accepted",
                 reasoning="The court has heard the testimony.",
                 fine_multiplier=0,
+                should_rule=True,
                 judge_emotion="measured",
                 evidence_required=False,
                 excuse_category="ordinary",

@@ -6,8 +6,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.database import connection_for
+from app.llm import LLMResult
 from app.main import create_app
+from app.schemas import JudgeVerdict, ProsecutorResponse
 
 
 def client_for(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
@@ -26,6 +29,165 @@ def open_case(client: TestClient, plea: str) -> str:
     assert plea_response.status_code == 200
     assert plea_response.json()["state"] == "awaiting_rebuttal"
     return session_id
+
+
+class _RoundScriptAdapter:
+    def __init__(self, judge_rulings: list[bool]) -> None:
+        self.judge_rulings = judge_rulings
+        self.judge_calls = 0
+        self.prosecutor_calls = 0
+
+    def complete_json(self, *, role: str, **_: object) -> LLMResult[ProsecutorResponse | JudgeVerdict]:
+        if role == "prosecutor":
+            self.prosecutor_calls += 1
+            return LLMResult(
+                value=ProsecutorResponse(
+                    objection="OBJECTION!",
+                    challenge=f"The court needs a fuller record for round {self.prosecutor_calls}.",
+                    question="What materially new detail can you offer?",
+                    emotion="objection",
+                ),
+                source="live",
+                configured=True,
+            )
+
+        should_rule = self.judge_rulings[self.judge_calls]
+        self.judge_calls += 1
+        return LLMResult(
+            value=JudgeVerdict(
+                verdict="accepted",
+                reasoning="The Judge has reviewed the full record.",
+                fine_multiplier=0,
+                should_rule=should_rule,
+                judge_emotion="stern",
+                evidence_required=False,
+                excuse_category="ordinary",
+            ),
+            source="live",
+            configured=True,
+        )
+
+
+class _ContinuingProsecutorFailureAdapter:
+    def __init__(self) -> None:
+        self.prosecutor_calls = 0
+
+    def complete_json(self, *, role: str, **_: object) -> LLMResult[ProsecutorResponse | JudgeVerdict]:
+        if role == "prosecutor":
+            self.prosecutor_calls += 1
+            if self.prosecutor_calls > 1:
+                return LLMResult(value=None, source="fallback", configured=True)
+            return LLMResult(
+                value=ProsecutorResponse(
+                    objection="OBJECTION!",
+                    challenge="The record needs another detail.",
+                    question="What changed?",
+                    emotion="objection",
+                ),
+                source="live",
+                configured=True,
+            )
+        return LLMResult(
+            value=JudgeVerdict(
+                verdict="accepted",
+                reasoning="The record needs one more response.",
+                fine_multiplier=0,
+                should_rule=False,
+                judge_emotion="stern",
+                evidence_required=False,
+                excuse_category="ordinary",
+            ),
+            source="live",
+            configured=True,
+        )
+
+
+def test_judge_can_continue_then_resolve_a_multi_round_trial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_path = tmp_path / "dynamic-rounds.db"
+    adapter = _RoundScriptAdapter([False, True])
+    monkeypatch.setattr(main_module, "LLMAdapter", lambda: adapter)
+
+    with TestClient(create_app(database_path)) as client:
+        session_id = open_case(client, "I have a headache again")
+        continued = client.post(
+            f"/court/{session_id}/rebuttal",
+            json={"text": "I took medication but the pain remained severe."},
+        )
+
+        assert continued.status_code == 200
+        continued_body = continued.json()
+        assert continued_body["state"] == "awaiting_rebuttal"
+        assert continued_body["should_rule"] is False
+        assert continued_body["prosecutor"]["question"] == "What materially new detail can you offer?"
+        assert "fine" not in continued_body
+        assert client.get("/ledger").json()["entries"] == []
+
+        resolved = client.post(
+            f"/court/{session_id}/rebuttal",
+            json={"text": "I do not have anything further to add."},
+        )
+
+    assert resolved.status_code == 200
+    resolved_body = resolved.json()
+    assert resolved_body["state"] == "resolved"
+    assert resolved_body["should_rule"] is True
+    assert resolved_body["fine"]["amount_cents"] == 300
+    assert adapter.judge_calls == 2
+    assert adapter.prosecutor_calls == 2
+    with connection_for(database_path) as connection:
+        session = connection.execute(
+            "SELECT transcript_json, turn_count FROM court_sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        fine_count = connection.execute("SELECT COUNT(*) AS count FROM fines WHERE session_id = ?", (session_id,)).fetchone()
+    assert session["turn_count"] == 2
+    assert len(json.loads(session["transcript_json"])) == 5
+    assert fine_count["count"] == 1
+
+
+def test_turn_cap_forces_a_final_ruling_even_when_the_judge_would_continue(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = _RoundScriptAdapter([False])
+    monkeypatch.setattr(main_module, "LLMAdapter", lambda: adapter)
+    monkeypatch.setattr(main_module, "MAX_TURNS", 1, raising=False)
+
+    with TestClient(create_app(tmp_path / "turn-cap.db")) as client:
+        session_id = open_case(client, "I have a headache again")
+        response = client.post(
+            f"/court/{session_id}/rebuttal",
+            json={"text": "I still need another chance to explain."},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "resolved"
+    assert response.json()["should_rule"] is True
+    assert adapter.judge_calls == 1
+    assert adapter.prosecutor_calls == 1
+
+
+def test_prosecutor_failure_after_a_continue_keeps_the_trial_playable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adapter = _ContinuingProsecutorFailureAdapter()
+    monkeypatch.setattr(main_module, "LLMAdapter", lambda: adapter)
+
+    with TestClient(create_app(tmp_path / "continuing-prosecutor-failure.db")) as client:
+        session_id = open_case(client, "I have a headache again")
+        response = client.post(
+            f"/court/{session_id}/rebuttal",
+            json={"text": "I took medication but the pain remained severe."},
+        )
+        today = client.get("/today")
+        ledger = client.get("/ledger")
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "awaiting_rebuttal"
+    assert response.json()["source"] == "fallback"
+    assert response.json()["prosecutor"]["objection"] == "OBJECTION!"
+    assert today.json()["session"]["id"] == session_id
+    assert ledger.json()["entries"] == []
 
 
 def test_repeated_excuse_resolves_once_with_integer_cents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

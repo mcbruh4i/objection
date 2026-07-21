@@ -433,6 +433,16 @@ function ObjectionApp() {
       if (!canUpdate(controller)) {
         return null;
       }
+      if (result.state === "awaiting_rebuttal") {
+        setActiveSessionId(result.session_id);
+        setProsecutor(result.prosecutor);
+        setToday((current) => current ? {
+          ...current,
+          session: { id: result.session_id, state: result.state, prosecutor: result.prosecutor },
+        } : current);
+        setCourtMode("objection");
+        return result;
+      }
       setVerdict(result.verdict);
       setFine(result.fine);
       setLedger((current) => mergeFine(current, result.fine));
@@ -1264,7 +1274,13 @@ function Courtroom({
     if (!active || !rebuttal.trim()) {
       return;
     }
-    await onSubmitRebuttal(rebuttal);
+    // Reset before the request settles so a continuing response can replay the
+    // existing objection sequence as soon as its parent switches modes.
+    objectionRun.current = false;
+    const result = await onSubmitRebuttal(rebuttal);
+    if (result) {
+      setRebuttal("");
+    }
   };
   const showInput = active && (mode === "plea" || mode === "rebuttal") && !frozen;
   const rejected = verdict?.verdict === "rejected";

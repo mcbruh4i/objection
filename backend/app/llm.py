@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Generic, Literal, TypeVar
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -13,6 +15,7 @@ Role = Literal["prosecutor", "judge"]
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
 REQUEST_TIMEOUT_SECONDS = 18
 MAX_ATTEMPTS = 2
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,8 +65,24 @@ class LLMAdapter:
         system_prompt: str,
         evidence_prompt: str,
         output_model: type[OutputModel],
+        raise_on_failure: bool = False,
     ) -> LLMResult[OutputModel]:
         if not self.settings.available_for(role):
+            error = "LLM_BASE_URL, LLM_API_KEY, or the role model is missing"
+            logger.warning(
+                "LLM request skipped role=%s model=%s error_type=ConfigurationError error=%s",
+                role,
+                self.settings.model_for(role) or "<missing>",
+                error,
+            )
+            logger.warning(
+                "LLM fallback activated role=%s model=%s attempts=0 error_type=ConfigurationError error=%s",
+                role,
+                self.settings.model_for(role) or "<missing>",
+                error,
+            )
+            if raise_on_failure:
+                raise RuntimeError(error)
             return LLMResult(
                 value=None,
                 source="fallback",
@@ -71,11 +90,13 @@ class LLMAdapter:
             )
 
         endpoint = self._endpoint()
+        endpoint_label = self._endpoint_label(endpoint)
         headers = {
             "Authorization": f"Bearer {self.settings.api_key}",
             "Content-Type": "application/json",
         }
         repair_instruction = "\nReturn only valid JSON matching the required schema; do not add prose."
+        last_error: Exception | None = None
 
         for attempt in range(MAX_ATTEMPTS):
             user_content = evidence_prompt if attempt == 0 else f"{evidence_prompt}{repair_instruction}"
@@ -88,13 +109,30 @@ class LLMAdapter:
                 "temperature": 0.2,
                 "response_format": {"type": "json_object"},
             }
+            logger.warning(
+                "LLM request started role=%s model=%s endpoint=%s attempt=%d/%d",
+                role,
+                self.settings.model_for(role),
+                endpoint_label,
+                attempt + 1,
+                MAX_ATTEMPTS,
+            )
             try:
                 with httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS) as client:
                     response = client.post(endpoint, headers=headers, json=payload)
                     response.raise_for_status()
                 content = self._content_from_response(response.json())
                 parsed = json.loads(content)
-                return LLMResult(value=output_model.model_validate(parsed), source="live", configured=True)
+                value = output_model.model_validate(parsed)
+                logger.warning(
+                    "LLM request succeeded role=%s model=%s endpoint=%s attempt=%d/%d",
+                    role,
+                    self.settings.model_for(role),
+                    endpoint_label,
+                    attempt + 1,
+                    MAX_ATTEMPTS,
+                )
+                return LLMResult(value=value, source="live", configured=True)
             except (
                 httpx.HTTPError,
                 IndexError,
@@ -103,16 +141,45 @@ class LLMAdapter:
                 ValueError,
                 ValidationError,
                 json.JSONDecodeError,
-            ):
+            ) as error:
                 # A failed model call never reaches the player; callers choose a
                 # deterministic, policy-constrained fallback instead.
+                last_error = error
+                logger.warning(
+                    "LLM request failed role=%s model=%s endpoint=%s attempt=%d/%d error_type=%s error=%s",
+                    role,
+                    self.settings.model_for(role),
+                    endpoint_label,
+                    attempt + 1,
+                    MAX_ATTEMPTS,
+                    type(error).__name__,
+                    error,
+                )
                 continue
 
+        error_type = type(last_error).__name__ if last_error is not None else "UnknownError"
+        error_message = str(last_error) if last_error is not None else "LLM request failed without a captured exception"
+        logger.warning(
+            "LLM fallback activated role=%s model=%s attempts=%d error_type=%s error=%s",
+            role,
+            self.settings.model_for(role),
+            MAX_ATTEMPTS,
+            error_type,
+            error_message,
+        )
+        if raise_on_failure and last_error is not None:
+            raise last_error
         return LLMResult(value=None, source="fallback", configured=True)
 
     def _endpoint(self) -> str:
         base = self.settings.base_url.rstrip("/")
         return base if base.endswith("/chat/completions") else f"{base}/chat/completions"
+
+    @staticmethod
+    def _endpoint_label(endpoint: str) -> str:
+        """Log a target's host and path without ever logging a query or secret."""
+        parsed = urlsplit(endpoint)
+        return f"{parsed.netloc}{parsed.path}" if parsed.netloc else parsed.path
 
     @staticmethod
     def _content_from_response(payload: object) -> str:

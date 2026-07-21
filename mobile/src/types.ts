@@ -56,6 +56,7 @@ export interface JudgeVerdict {
   verdict: VerdictValue;
   reasoning: string;
   fine_multiplier: number;
+  should_rule: boolean;
   judge_emotion: string;
   evidence_required: boolean;
   excuse_category: ExcuseCategory;
@@ -77,13 +78,24 @@ export interface PleaResponse {
   source: "live" | "fallback";
 }
 
-export interface RebuttalResponse {
+export interface ContinuingRebuttalResponse {
   session_id: string;
-  state: CourtState;
+  state: "awaiting_rebuttal";
+  should_rule: false;
+  prosecutor: ProsecutorResponse;
+  source: "live" | "fallback";
+}
+
+export interface ResolvedRebuttalResponse {
+  session_id: string;
+  state: "resolved";
+  should_rule: true;
   verdict: JudgeVerdict;
   fine: Fine;
   source: "live" | "fallback" | "absentia";
 }
+
+export type RebuttalResponse = ContinuingRebuttalResponse | ResolvedRebuttalResponse;
 
 export interface LedgerEntry {
   id: string;

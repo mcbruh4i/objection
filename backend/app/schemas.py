@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class StrictModel(BaseModel):
@@ -58,6 +58,7 @@ class JudgeVerdict(StrictModel):
     verdict: Literal["accepted", "rejected"]
     reasoning: str = Field(min_length=1, max_length=500)
     fine_multiplier: Literal[0, 1, 1.5, 2]
+    should_rule: StrictBool = True
     judge_emotion: str = Field(default="neutral", min_length=1, max_length=80)
     evidence_required: bool
     excuse_category: Literal[
@@ -87,12 +88,24 @@ class PleaResponse(StrictModel):
     source: Literal["live", "fallback"]
 
 
-class RebuttalResponse(StrictModel):
+class ContinuingRebuttalResponse(StrictModel):
+    session_id: str
+    state: Literal["awaiting_rebuttal"]
+    should_rule: Literal[False]
+    prosecutor: ProsecutorResponse
+    source: Literal["live", "fallback"]
+
+
+class ResolvedRebuttalResponse(StrictModel):
     session_id: str
     state: Literal["resolved"]
+    should_rule: Literal[True]
     verdict: JudgeVerdict
     fine: FineResponse
     source: Literal["live", "fallback", "absentia"]
+
+
+RebuttalResponse = ContinuingRebuttalResponse | ResolvedRebuttalResponse
 
 
 class LedgerEntryResponse(FineResponse):
