@@ -30,7 +30,15 @@ import Reanimated, {
 } from "react-native-reanimated";
 
 import { api, isRequestCancelled } from "./src/api";
-import { courtImages, prosecutorVideos, type CourtSound, useCourtAudio } from "./src/media/courtMedia";
+import {
+  courtImages,
+  courtVideoFor,
+  prosecutorVideos,
+  type CourtSound,
+  type CourtSpeaker,
+  type CourtVideoKey,
+  useCourtAudio,
+} from "./src/media/courtMedia";
 import { useThemeTokens, type ThemeTokens } from "./src/theme/tokens";
 import type {
   Fine,
@@ -48,9 +56,9 @@ const AnimatedSvgPath = Reanimated.createAnimatedComponent(Path);
 const RNAnimatedPath = RNAnimated.createAnimatedComponent(Path);
 
 type Screen = "today" | "courtroom" | "ledger" | "settings";
-type CourtMode = "plea" | "deliberating" | "objection" | "rebuttal" | "verdict";
+type CourtMode = "plea" | "deliberating" | "objection" | "rebuttal" | "judging" | "verdict";
 type PendingAction = "add" | "complete" | "skip" | "plea" | "rebuttal" | "reset" | null;
-type ClipName = keyof typeof prosecutorVideos;
+type ClipName = CourtVideoKey;
 type PlayerIndex = 0 | 1;
 
 function formatMockCents(cents: number): string {
@@ -416,10 +424,12 @@ function ObjectionApp() {
       return null;
     }
     setPendingAction("rebuttal");
+    setCourtMode("judging");
     setError(null);
+    const rebuttalSessionId = sessionId;
     const controller = startRequest();
     try {
-      const result = await api.submitRebuttal(sessionId, text.trim(), { signal: controller.signal });
+      const result = await api.submitRebuttal(rebuttalSessionId, text.trim(), { signal: controller.signal });
       if (!canUpdate(controller)) {
         return null;
       }
@@ -451,7 +461,14 @@ function ObjectionApp() {
       }
       return result;
     } catch (requestError) {
+      if (isRequestCancelled(requestError)) {
+        if (mountedRef.current && sessionIdRef.current === rebuttalSessionId) {
+          setCourtMode("rebuttal");
+        }
+        return null;
+      }
       if (canUpdate(controller) && !isRequestCancelled(requestError)) {
+        setCourtMode("rebuttal");
         setError(requestError instanceof Error ? requestError.message : "The judge could not issue a ruling.");
       }
       return null;
@@ -1012,6 +1029,19 @@ function Courtroom({
   const activeRef = useRef(active);
   const courtTimeouts = useRef(new Set<ReturnType<typeof setTimeout>>());
   activeRef.current = active;
+  const dialogueSpeaker: CourtSpeaker = mode === "plea"
+    ? "defense"
+    : mode === "verdict" || mode === "judging"
+      ? "judge"
+      : "prosecutor";
+  const awaitingCourtResponse = mode === "deliberating" || mode === "judging";
+  const speakerEmotion = dialogueSpeaker === "prosecutor"
+    ? prosecutor?.emotion
+    : dialogueSpeaker === "judge"
+      ? verdict?.judge_emotion
+      : "idle";
+  const speakerVideo = courtVideoFor(dialogueSpeaker, awaitingCourtResponse ? "idle" : speakerEmotion);
+  const activeClip = sources[activePlayer];
 
   const clearCourtTimers = () => {
     courtTimeouts.current.forEach((timeout) => clearTimeout(timeout));
@@ -1161,10 +1191,11 @@ function Courtroom({
   }, [active, mode, switchClip]);
 
   useEffect(() => {
-    if (active && (mode === "plea" || mode === "deliberating")) {
-      switchClip("talk");
+    if (!active || mode === "objection" || activeClip === speakerVideo.fallback) {
+      return;
     }
-  }, [active, mode, switchClip]);
+    switchClip(speakerVideo.fallback);
+  }, [active, activeClip, mode, speakerVideo.fallback, switchClip]);
 
   useEffect(() => {
     if (!active || mode !== "verdict") {
@@ -1179,17 +1210,22 @@ function Courtroom({
     ]).start();
   }, [active, mode, reducedMotion, stampRotation, stampScale, theme]);
 
-  const speaker = mode === "plea" ? "DEFENSE" : mode === "deliberating" ? "THE PROSECUTION IS DELIBERATING…" : mode === "verdict" ? "THE JUDGE" : "THE PROSECUTOR";
+  const speaker = dialogueSpeaker === "defense"
+    ? "DEFENSE"
+    : dialogueSpeaker === "judge"
+      ? "THE JUDGE"
+      : "THE PROSECUTOR";
   const dialogue = mode === "plea"
     ? "State the facts. Why can you not complete this promise today?"
     : mode === "deliberating"
-      ? "The prosecution is deliberating…"
-      : mode === "rebuttal"
-        ? `${prosecutor?.challenge ?? "The court needs a clearer record."} ${prosecutor?.question ?? "What can you add?"}`
-        : mode === "verdict"
-          ? verdict?.reasoning ?? "The court has reached a ruling."
-          : "";
-  const dialogueSpeaker = mode === "plea" ? "defense" : mode === "verdict" ? "judge" : "prosecutor";
+      ? "The prosecution is reviewing the case file..."
+      : mode === "judging"
+        ? "The judge is deliberating..."
+        : mode === "rebuttal"
+          ? `${prosecutor?.challenge ?? "The court needs a clearer record."} ${prosecutor?.question ?? "What can you add?"}`
+          : mode === "verdict"
+            ? verdict?.reasoning ?? "The court has reached a ruling."
+            : "";
   const nameplateTone = dialogueSpeaker === "defense"
     ? styles.nameplateDefense
     : dialogueSpeaker === "prosecutor"
@@ -1205,7 +1241,14 @@ function Courtroom({
     : dialogueSpeaker === "prosecutor"
       ? styles.dialogueTailProsecutor
       : styles.dialogueTailJudge;
-  const typewriter = useTypewriter(dialogue, active && !frozen && mode !== "objection" && mode !== "deliberating", reducedMotion, theme, dialogueSpeaker, playSound);
+  const typewriter = useTypewriter(
+    dialogue,
+    active && !frozen && mode !== "objection",
+    reducedMotion || awaitingCourtResponse,
+    theme,
+    dialogueSpeaker,
+    playSound,
+  );
 
   useEffect(() => setDialogueComplete(typewriter.complete), [typewriter.complete]);
   useEffect(() => setDialogueComplete(false), [mode]);
@@ -1268,7 +1311,7 @@ function Courtroom({
           </View>
           <Pressable accessibilityRole="button" onPress={typewriter.finish} style={[styles.dialogueBox, dialogueTone]}>
             <Text style={styles.dialogueText}>{typewriter.text}</Text>
-            {mode !== "deliberating" && mode !== "objection" ? <Text style={styles.advanceHint}>▼</Text> : null}
+            {mode !== "deliberating" && mode !== "judging" && mode !== "objection" ? <Text style={styles.advanceHint}>▼</Text> : null}
             <View pointerEvents="none" style={[styles.dialogueTail, tailTone]} />
           </Pressable>
         </View>

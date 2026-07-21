@@ -33,6 +33,8 @@ from .schemas import (
     TodayResponse,
 )
 
+MAX_HABITS_PER_DAY = 20
+
 
 class SessionStageSingleFlight:
     """Serialize a local server's outbound work for one session and stage."""
@@ -238,8 +240,11 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 total = connection.execute("SELECT COUNT(*) AS total FROM habits").fetchone()["total"]
-                if total >= 6:
-                    raise HTTPException(status_code=409, detail="The docket is full: six promises per day at most.")
+                if total >= MAX_HABITS_PER_DAY:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"The docket is full: {MAX_HABITS_PER_DAY} promises per day at most.",
+                    )
                 connection.execute(
                     """
                     INSERT INTO habits (id, title, minutes, deadline_at, penalty_cents, status)

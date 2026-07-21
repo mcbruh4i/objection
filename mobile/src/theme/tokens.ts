@@ -120,7 +120,7 @@ const raw = {
   percentBase: 100,
   dialogueBlipStride: 2,
   maxSubmissionLength: 600,
-  maxHabits: 6,
+  maxHabits: 20,
   maxHabitTitleLength: 80,
   full: "100%" as const,
   almostFull: "92%" as const,

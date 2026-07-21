@@ -9,11 +9,104 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app.court import evaluate_policy, is_injection_attempt
+from app.court import evaluate_policy, is_injection_attempt, judge_response, prosecutor_response
 from app.database import connection_for
 from app.llm import LLMResult
 from app.main import create_app
 from app.schemas import JudgeVerdict, ProsecutorResponse
+
+
+def test_emotion_defaults_support_older_saved_court_records() -> None:
+    prosecutor = ProsecutorResponse.model_validate(
+        {
+            "objection": "The record is listening.",
+            "challenge": "The court needs a clearer account.",
+            "question": "What happened?",
+        }
+    )
+    verdict = JudgeVerdict.model_validate(
+        {
+            "verdict": "accepted",
+            "reasoning": "The court has heard the testimony.",
+            "fine_multiplier": 0,
+            "evidence_required": False,
+            "excuse_category": "ordinary",
+        }
+    )
+
+    assert prosecutor.emotion == "idle"
+    assert verdict.judge_emotion == "neutral"
+
+
+class _MissingEmotionAdapter:
+    def complete_json(self, *, role: str, **_: object) -> LLMResult[ProsecutorResponse | JudgeVerdict]:
+        if role == "prosecutor":
+            return LLMResult(
+                value=ProsecutorResponse.model_validate(
+                    {
+                        "objection": "The record is listening.",
+                        "challenge": "The court needs a clearer account.",
+                        "question": "What happened?",
+                    }
+                ),
+                source="live",
+                configured=True,
+            )
+        return LLMResult(
+            value=JudgeVerdict.model_validate(
+                {
+                    "verdict": "accepted",
+                    "reasoning": "The court has heard the testimony.",
+                    "fine_multiplier": 0,
+                    "evidence_required": False,
+                    "excuse_category": "ordinary",
+                }
+            ),
+            source="live",
+            configured=True,
+        )
+
+
+def test_missing_live_emotion_tags_keep_the_existing_fallback_behavior() -> None:
+    policy = evaluate_policy("The train was unexpectedly delayed.", ())
+    adapter = _MissingEmotionAdapter()
+
+    prosecutor, prosecutor_source = prosecutor_response(
+        adapter=adapter,
+        habit_title="30 minutes of exercise",
+        plea="The train was unexpectedly delayed.",
+        memories=[],
+        policy=policy,
+    )
+    judge, judge_source = judge_response(
+        adapter=adapter,
+        habit_title="30 minutes of exercise",
+        plea="The train was unexpectedly delayed.",
+        rebuttal="I will make up the time tomorrow.",
+        memories=[],
+        policy=policy,
+    )
+
+    assert prosecutor_source == "fallback"
+    assert prosecutor.emotion == "attentive"
+    assert judge_source == "absentia"
+    assert judge.judge_emotion == "unavailable"
+
+
+def test_daily_habit_limit_allows_twenty_then_rejects_the_twenty_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _clear_llm_environment(monkeypatch)
+    with TestClient(create_app(tmp_path / "twenty-habit-limit.db")) as client:
+        responses = [
+            client.post("/habits", json={"title": f"Promise {index}"})
+            for index in range(1, 20)
+        ]
+        overflow = client.post("/habits", json={"title": "Too many promises"})
+
+    assert all(response.status_code == 201 for response in responses)
+    assert overflow.status_code == 409
+    assert "20" in overflow.json()["detail"]
 
 
 def _clear_llm_environment(monkeypatch: pytest.MonkeyPatch) -> None:

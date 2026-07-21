@@ -33,7 +33,7 @@ class ProsecutorResponse(StrictModel):
     objection: str = Field(min_length=1, max_length=280)
     challenge: str = Field(min_length=1, max_length=500)
     question: str = Field(min_length=1, max_length=280)
-    emotion: str = Field(min_length=1, max_length=80)
+    emotion: str = Field(default="idle", min_length=1, max_length=80)
 
 
 class SessionSummary(StrictModel):
@@ -58,7 +58,7 @@ class JudgeVerdict(StrictModel):
     verdict: Literal["accepted", "rejected"]
     reasoning: str = Field(min_length=1, max_length=500)
     fine_multiplier: Literal[0, 1, 1.5, 2]
-    judge_emotion: str = Field(min_length=1, max_length=80)
+    judge_emotion: str = Field(default="neutral", min_length=1, max_length=80)
     evidence_required: bool
     excuse_category: Literal[
         "ordinary",

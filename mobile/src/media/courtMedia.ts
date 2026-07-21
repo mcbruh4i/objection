@@ -1,15 +1,64 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Audio, type AVPlaybackSource } from "expo-av";
 
-/**
- * All media is bundled. The generated placeholder clips deliberately keep the
- * final production filenames, so replacing a clip never changes app code.
- */
+/** All media playback uses bundled sources; no court audio or video is fetched at runtime. */
 export const prosecutorVideos = {
   talk: require("../../assets/video/talk-loop.mp4") as AVPlaybackSource,
   bench: require("../../assets/video/bench-slam.mp4") as AVPlaybackSource,
   point: require("../../assets/video/objection-point.mp4") as AVPlaybackSource,
 } as const;
+
+export type CourtSpeaker = "prosecutor" | "judge" | "defense";
+export type CourtVideoKey = keyof typeof prosecutorVideos;
+
+export interface CourtVideoSelection {
+  /** The final bundled filename to use when that character clip is available. */
+  filename: string;
+  /** A source that is bundled today, so a missing final clip never breaks court. */
+  fallback: CourtVideoKey;
+}
+
+/**
+ * Metro requires local assets to be statically resolvable. The final character
+ * filenames are recorded here now; while a file is absent, the scene uses the
+ * already bundled talk loop as that character's idle fallback. Adding a final
+ * clip later only requires registering its static source here.
+ */
+export const courtVideoManifest = {
+  prosecutor: {
+    idle: { filename: "prosecutor_idle.mp4", fallback: "talk" },
+    objection: { filename: "prosecutor_objection.mp4", fallback: "talk" },
+    condemning: { filename: "prosecutor_condemn.mp4", fallback: "talk" },
+  },
+  judge: {
+    idle: { filename: "judge_idle.mp4", fallback: "talk" },
+    verdict: { filename: "judge_verdict.mp4", fallback: "talk" },
+  },
+  defense: {
+    idle: { filename: "defense_idle.mp4", fallback: "talk" },
+  },
+} as const satisfies Record<CourtSpeaker, Record<string, CourtVideoSelection>>;
+
+/** Resolve model emotion text to a character clip, with a bundled idle fallback. */
+export function courtVideoFor(speaker: CourtSpeaker, emotion?: string | null): CourtVideoSelection {
+  const normalizedEmotion = emotion?.trim().toLowerCase() ?? "";
+  if (speaker === "prosecutor") {
+    if (normalizedEmotion === "objection" || normalizedEmotion === "angry") {
+      return courtVideoManifest.prosecutor.objection;
+    }
+    if (normalizedEmotion === "smug" || normalizedEmotion === "condemning") {
+      return courtVideoManifest.prosecutor.condemning;
+    }
+    return courtVideoManifest.prosecutor.idle;
+  }
+  if (speaker === "judge") {
+    if (normalizedEmotion === "verdict" || normalizedEmotion === "stern" || normalizedEmotion === "angry") {
+      return courtVideoManifest.judge.verdict;
+    }
+    return courtVideoManifest.judge.idle;
+  }
+  return courtVideoManifest.defense.idle;
+}
 
 export const courtImages = {
   objectionSplash: require("../../assets/images/objection-splash.webp"),
