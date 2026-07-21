@@ -13,7 +13,7 @@ from pydantic import BaseModel, ValidationError
 
 Role = Literal["prosecutor", "judge"]
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
-REQUEST_TIMEOUT_SECONDS = 18
+REQUEST_TIMEOUT_SECONDS = 35
 MAX_ATTEMPTS = 2
 logger = logging.getLogger(__name__)
 
