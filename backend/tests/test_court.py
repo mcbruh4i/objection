@@ -211,13 +211,19 @@ def test_repeated_excuse_resolves_once_with_integer_cents(tmp_path: Path, monkey
 
         repeat_skip = client.post("/habits/habit-exercise-today/skip")
         assert repeat_skip.status_code == 200
-        assert repeat_skip.json() == {"session_id": session_id, "state": "resolved", "created": False}
+        repeat_body = repeat_skip.json()
+        assert repeat_body["created"] is True
+        assert repeat_body["state"] == "awaiting_plea"
+        assert repeat_body["session_id"] != session_id
 
     with connection_for(database_path) as connection:
         fine_count = connection.execute("SELECT COUNT(*) AS count FROM fines").fetchone()["count"]
-        state = connection.execute("SELECT state FROM court_sessions").fetchone()["state"]
+        states = [
+            row["state"]
+            for row in connection.execute("SELECT state FROM court_sessions ORDER BY created_at").fetchall()
+        ]
         assert fine_count == 1
-        assert state == "resolved"
+        assert states == ["resolved", "awaiting_plea"]
 
 
 def test_new_excuse_is_accepted_but_still_records_one_zero_cent_fine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

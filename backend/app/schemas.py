@@ -39,6 +39,7 @@ class ProsecutorResponse(StrictModel):
 class SessionSummary(StrictModel):
     id: str
     state: Literal["awaiting_plea", "awaiting_rebuttal", "resolved"]
+    habit_id: str | None = None
     prosecutor: ProsecutorResponse | None = None
 
 
@@ -115,6 +116,18 @@ class LedgerEntryResponse(FineResponse):
 class LedgerResponse(StrictModel):
     balance_cents: int
     entries: list[LedgerEntryResponse]
+
+
+class HistoryDayResponse(StrictModel):
+    date: str
+    total: int
+    completed: int
+    skipped: int
+    fine_cents: int
+
+
+class HistoryResponse(StrictModel):
+    days: list[HistoryDayResponse]
 
 
 class DemoResetResponse(StrictModel):

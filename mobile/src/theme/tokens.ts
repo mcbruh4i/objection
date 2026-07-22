@@ -1,300 +1,183 @@
-import { useMemo } from "react";
-import { useWindowDimensions } from "react-native";
-
 /**
- * Objection! design system — two layers, one file.
+ * LAYER 2 — SEMANTIC TOKENS. The only theme surface components may import.
  *
- * Layer 1 · Tracker (calm, daily use): parchment canvas, courtroom-navy ink,
- * Space Grotesk type. Judicial gold is reserved for streaks and achievements.
- * Layer 2 · Courtroom (dramatic): courtroom-navy canvas, bench-navy panels,
- * Anton all-caps display, prosecutor red vs defense blue, high contrast.
+ * Brutalist system (per approved plan, grounded in ui-ux-pro-max
+ * "Kinetic Brutalism (Mobile)"): 0px radius, thick visible borders, hard
+ * offset shadows with zero blur, heavy weights, instant transitions.
  *
- * UI code consumes the semantic maps (`tracker`, `court`), so a palette
- * change stays local to this file. `colors` is the legacy map kept so
- * not-yet-restyled screens keep compiling during the screen-by-screen pass.
+ * Two worlds:
+ *   - paper world (tracker): colors.bg / surface / textPrimary…
+ *   - court world (courtroom): colors.bgCourt / surfaceCourt / textOnDark…
  */
-export const palette = {
-  parchment: "#F3ECD9",
-  courtroomNavy: "#16213C",
-  benchNavy: "#24345A",
-  judicialGold: "#C9A227",
-  gallerySlate: "#93A0BB",
-  railNavy: "#3B4C74",
-  prosecutorRed: "#E05141",
-  defenseBlue: "#5B8DEF",
-} as const;
+import { TextStyle } from "react-native";
+import { palette } from "./palette";
+import { fontFamilies } from "./fonts";
 
-/** Tints derived from the registered palette — no new hues. */
-const tints = {
-  parchmentRaised: "#FBF6E8",
-  navyWhisper: "rgba(22, 33, 60, 0.06)",
-  navyTrack: "rgba(22, 33, 60, 0.12)",
-  navyLine: "rgba(22, 33, 60, 0.18)",
-  navySoft: "rgba(22, 33, 60, 0.62)",
-  goldSoft: "rgba(201, 162, 39, 0.18)",
-  parchmentVeil: "rgba(243, 236, 217, 0.08)",
-} as const;
-
-export const fonts = {
-  body: "SpaceGrotesk_400Regular",
-  bodyMedium: "SpaceGrotesk_500Medium",
-  bodyStrong: "SpaceGrotesk_700Bold",
-  display: "Anton_400Regular",
-} as const;
-
-/** Layer 1 — the calm tracker. Gold appears only on streaks/achievements. */
-export const tracker = {
-  background: palette.parchment,
-  card: tints.parchmentRaised,
-  sunken: tints.navyWhisper,
-  line: tints.navyLine,
-  text: palette.courtroomNavy,
-  textMuted: tints.navySoft,
-  primary: palette.courtroomNavy,
-  onPrimary: palette.parchment,
-  accent: palette.judicialGold,
-  accentSoft: tints.goldSoft,
-  gaugeTrack: tints.navyTrack,
-  danger: "#B23A2E",
-} as const;
-
-/** Layer 2 — the dramatic courtroom. */
-export const court = {
-  background: palette.courtroomNavy,
-  panel: palette.benchNavy,
-  line: palette.railNavy,
-  text: palette.parchment,
-  textMuted: palette.gallerySlate,
-  gold: palette.judicialGold,
-  prosecutor: palette.prosecutorRed,
-  defense: palette.defenseBlue,
-  veil: tints.parchmentVeil,
-} as const;
-
-/**
- * Legacy semantic map. Values point at the tracker layer so screens that
- * have not been restyled yet stay calm and readable; each screen is being
- * repointed to `tracker`/`court` explicitly as the redesign lands.
- */
 export const colors = {
-  background: tracker.background,
-  card: tracker.card,
-  elevated: tracker.card,
-  navBar: tracker.card,
-  trim: palette.railNavy,
-  borderSubtle: tracker.line,
-  primary: tracker.primary,
-  primaryPressed: palette.benchNavy,
-  gaugeTrack: tracker.gaugeTrack,
-  gaugeFill: palette.courtroomNavy,
-  gaugeFillEnd: palette.benchNavy,
-  text: tracker.text,
-  textMuted: tracker.textMuted,
-  input: tracker.card,
-  success: palette.judicialGold,
-  objection: palette.prosecutorRed,
-  fine: palette.prosecutorRed,
-  rejected: palette.prosecutorRed,
-  flash: palette.parchment,
+  // paper world
+  bg: palette.cream100,
+  surface: palette.white,
+  surfaceAlt: palette.cream200,
+  textPrimary: palette.ink900,
+  textMuted: palette.ink700,
+  line: palette.ink900,
+  lineSoft: palette.khaki400,
+
+  // court world
+  bgCourt: palette.ink800,
+  surfaceCourt: palette.ink900,
+  textOnDark: palette.cream100,
+  textMutedOnDark: palette.khaki400,
+  lineOnDark: palette.cream100,
+
+  // shared roles
+  accent: palette.orange500,
+  accentPressed: palette.orange600,
+  onAccent: palette.ink900,
+  danger: palette.red600,
+  onDanger: palette.white,
+  shadow: palette.ink900,
+  /**
+   * Light plate behind verdict stamps: red/ink stamps sit on a paper slip so
+   * GUILTY stays WCAG-legible inside the dark court world (QA: red on the
+   * dark canvas is 2.6:1 — on this plate it is 4.6:1).
+   */
+  stampPlate: palette.cream100,
 } as const;
 
-const raw = {
-  baseWidth: 24,
-  minUnit: 14,
-  maxUnit: 22,
-  compactBreakpoint: 520,
-  tabletBreakpoint: 760,
-  desktopMaxWidth: 940,
-  videoWidthRatio: 0.92,
-  videoAspectRatio: 480 / 636,
-  gaugeUnits: 11,
-  gaugeStrokeRatio: 0.12,
-  checkStrokeRatio: 0.18,
-  heatmapColumns: 7,
-  heatmapRows: 5,
-  heatmapCellGapPercent: 6,
-  heatmapIntensityOne: 1,
-  heatmapIntensityTwo: 2,
-  heatmapIntensityThree: 3,
-  heatmapDemoPattern: [0, 1, 2, 1, 0, 2, 1] as const,
-  percentBase: 100,
-  dialogueBlipStride: 2,
-  maxSubmissionLength: 600,
-  maxHabits: 20,
-  maxHabitTitleLength: 80,
-  full: "100%" as const,
-  almostFull: "92%" as const,
-  tabWidth: "50%" as const,
-  zero: 0,
-  flexOne: 1,
-  borderThin: 1,
-  borderStrong: 2,
-  transparent: 0,
-  opaque: 1,
-  subdued: 0.66,
-  pressed: 0.82,
-  inactive: 0.48,
-  titleLongPressMs: 750,
-  gaugeDurationMs: 700,
-  typewriterMsPerCharacter: 28,
-  typewriterStartDelayMs: 140,
-  courtAutoAdvanceMs: 1200,
-  preShoutSilenceMs: 300,
-  videoProgressUpdateMs: 32,
-  benchImpactMs: 210,
-  pointImpactMs: 260,
-  flashFramesMs: 66,
-  splashDurationMs: 460,
-  stampDurationMs: 540,
-  sceneTransitionMs: 160,
-  objectionStartScale: 4.4,
-  objectionEndScale: 1,
-  objectionJitter: 1,
-  shakeDistance: 1,
-  noRotation: "0deg" as const,
-  objectionRotation: "-2deg" as const,
-  stampStartRotation: "-8deg" as const,
-  spinnerSmall: "small" as const,
-  spinnerLarge: "large" as const,
+/** Spacing scale — the only spacing values allowed in components. */
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  x3l: 32,
+  x4l: 48,
 } as const;
 
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(Math.max(value, minimum), maximum);
-}
+/** Border widths — visible structure is the brutalist skeleton. */
+export const borders = {
+  rule: 1,
+  bold: 2,
+  heavy: 3,
+} as const;
+
+/** Hard shadows: offset only, NO blur. Rendered by HardShadowBox. */
+export const shadows = {
+  offset: 4,
+  offsetSmall: 3,
+} as const;
+
+export const radii = {
+  /** Brutalism: sharp corners everywhere. Single token so it stays auditable. */
+  none: 0,
+} as const;
+
+/** Opacity steps (pressed states are instant, not animated). */
+export const opacity = {
+  pressed: 0.85,
+  disabled: 0.45,
+} as const;
+
+/** Touch targets (ux QA: min 44, hitSlop for smaller glyphs). */
+export const touch = {
+  minTarget: 44,
+  hitSlop: { top: 10, bottom: 10, left: 10, right: 10 },
+} as const;
+
+type TypeVariant = Pick<
+  TextStyle,
+  "fontFamily" | "fontSize" | "lineHeight" | "letterSpacing" | "textTransform"
+>;
 
 /**
- * The layout scale is derived from the viewport and clamped to remain tactile
- * on compact phones and composed on desktop Expo Web.
+ * Type scale. Persian needs generous line-height (≥1.7×) — long judge and
+ * prosecutor strings must never clip (API contract note).
+ * English shout/stamp/mono variants keep the tight brutalist rhythm.
  */
-export function createThemeTokens(width: number) {
-  const unit = clamp(width / raw.baseWidth, raw.minUnit, raw.maxUnit);
-  const space = {
-    xxs: unit * 0.25,
-    xs: unit * 0.5,
-    sm: unit * 0.75,
-    md: unit,
-    lg: unit * 1.5,
-    xl: unit * 2,
-    xxl: unit * 3,
-    xxxl: unit * 4,
-  } as const;
-  const bodySize = unit;
-  const type = {
-    body: {
-      fontFamily: fonts.body,
-      fontSize: bodySize,
-      lineHeight: bodySize + space.xs,
-    },
-    bodyStrong: {
-      fontFamily: fonts.bodyStrong,
-      fontSize: bodySize,
-      lineHeight: bodySize + space.xs,
-    },
-    label: {
-      fontFamily: fonts.bodyStrong,
-      fontSize: bodySize * 0.78,
-      lineHeight: bodySize,
-      letterSpacing: space.xxs,
-      textTransform: "uppercase" as const,
-    },
-    section: {
-      fontFamily: fonts.bodyStrong,
-      fontSize: bodySize * 1.55,
-      lineHeight: bodySize * 1.55 + space.xs,
-    },
-    title: {
-      fontFamily: fonts.bodyStrong,
-      fontSize: bodySize * 1.78,
-      lineHeight: bodySize * 1.78 + space.sm,
-    },
-    numeric: {
-      fontFamily: fonts.bodyStrong,
-      fontSize: bodySize * 2.45,
-      lineHeight: bodySize * 2.45 + space.sm,
-      fontVariant: ["tabular-nums"] as "tabular-nums"[],
-    },
-    display: {
-      fontFamily: fonts.display,
-      fontSize: bodySize * 2.45,
-      lineHeight: bodySize * 2.45 + space.sm,
-      letterSpacing: space.xxs,
-      textTransform: "uppercase" as const,
-    },
-    verdict: {
-      fontFamily: fonts.display,
-      fontSize: bodySize * 2.05,
-      lineHeight: bodySize * 2.05 + space.sm,
-      letterSpacing: space.xxs,
-      textTransform: "uppercase" as const,
-    },
-  } as const;
+export const type = {
+  shout: {
+    fontFamily: fontFamilies.shout.bold,
+    fontSize: 44,
+    lineHeight: 46,
+    letterSpacing: -1,
+    textTransform: "uppercase",
+  },
+  stamp: {
+    fontFamily: fontFamilies.shout.bold,
+    fontSize: 34,
+    lineHeight: 38,
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  /** Compact verdict stamp for in-card seals (same ink, smaller slam). */
+  stampSmall: {
+    fontFamily: fontFamilies.shout.bold,
+    fontSize: 16,
+    lineHeight: 20,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+  },
+  display: {
+    fontFamily: fontFamilies.display.black,
+    fontSize: 28,
+    lineHeight: 44,
+  },
+  h1: {
+    fontFamily: fontFamilies.display.bold,
+    fontSize: 21,
+    lineHeight: 34,
+  },
+  h2: {
+    fontFamily: fontFamilies.body.bold,
+    fontSize: 17,
+    lineHeight: 28,
+  },
+  body: {
+    fontFamily: fontFamilies.body.regular,
+    fontSize: 15,
+    lineHeight: 26,
+  },
+  bodyBold: {
+    fontFamily: fontFamilies.body.bold,
+    fontSize: 15,
+    lineHeight: 26,
+  },
+  label: {
+    fontFamily: fontFamilies.body.medium,
+    fontSize: 13,
+    lineHeight: 22,
+  },
+  caption: {
+    fontFamily: fontFamilies.body.regular,
+    fontSize: 12,
+    lineHeight: 20,
+  },
+  mono: {
+    fontFamily: fontFamilies.mono.regular,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  monoBold: {
+    fontFamily: fontFamilies.mono.bold,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+} as const satisfies Record<string, TypeVariant>;
 
-  return {
-    colors,
-    tracker,
-    court,
-    fonts,
-    raw,
-    unit,
-    width,
-    isCompact: width < raw.compactBreakpoint,
-    isTablet: width >= raw.tabletBreakpoint,
-    space,
-    type,
-    layout: {
-      contentWidth: width >= raw.tabletBreakpoint ? raw.almostFull : raw.full,
-      contentMaxWidth: raw.desktopMaxWidth,
-      videoWidth: raw.videoWidthRatio * 100,
-      buttonMinHeight: space.xxl,
-      buttonMaxWidth: "70%" as const,
-      inputMinHeight: space.xxxl,
-      cardRadius: space.md,
-      controlRadius: space.sm,
-      pillRadius: space.xxl,
-      capsuleRadius: space.xxxl,
-      borderThin: raw.borderThin,
-      borderStrong: raw.borderStrong,
-      heatmapCells: raw.heatmapColumns * raw.heatmapRows,
-      heatmapColumns: raw.heatmapColumns,
-      heatmapCellWidth: `${(raw.percentBase - raw.heatmapCellGapPercent) / raw.heatmapColumns}%` as const,
-      safeBottomPad: space.md,
-    },
-    motion: {
-      gaugeDurationMs: raw.gaugeDurationMs,
-      typewriterMsPerCharacter: raw.typewriterMsPerCharacter,
-      typewriterStartDelayMs: raw.typewriterStartDelayMs,
-      courtAutoAdvanceMs: raw.courtAutoAdvanceMs,
-      preShoutSilenceMs: raw.preShoutSilenceMs,
-      videoProgressUpdateMs: raw.videoProgressUpdateMs,
-      benchImpactMs: raw.benchImpactMs,
-      pointImpactMs: raw.pointImpactMs,
-      flashFramesMs: raw.flashFramesMs,
-      splashDurationMs: raw.splashDurationMs,
-      stampDurationMs: raw.stampDurationMs,
-      sceneTransitionMs: raw.sceneTransitionMs,
-    },
-    media: {
-      videoAspectRatio: raw.videoAspectRatio,
-      gaugeUnits: raw.gaugeUnits,
-      gaugeStrokeRatio: raw.gaugeStrokeRatio,
-      checkStrokeRatio: raw.checkStrokeRatio,
-      splashStartScale: raw.objectionStartScale,
-      splashEndScale: raw.objectionEndScale,
-      splashJitter: raw.objectionJitter,
-      shakeDistance: raw.shakeDistance,
-    },
-    icons: {
-      flameViewBox: "0 0 24 24",
-      flamePath: "M12 2C8.7 6.2 6.2 8.7 6.2 13.4c0 3.6 2.6 6.6 5.8 6.6s5.8-3 5.8-6.6C17.8 9.7 15.3 6.2 12 2Zm0 15.4c-1.6 0-2.8-1.4-2.8-3.1 0-1.5.8-2.9 2.8-5.4 2 2.5 2.8 3.9 2.8 5.4 0 1.7-1.2 3.1-2.8 3.1Z",
-      checkViewBox: "0 0 24 24",
-      checkPath: "M5 12.5 9.5 17 19 7.5",
-    },
-  } as const;
-}
+export type TypeVariantName = keyof typeof type;
 
-export type ThemeTokens = ReturnType<typeof createThemeTokens>;
+export const theme = {
+  colors,
+  spacing,
+  borders,
+  shadows,
+  radii,
+  opacity,
+  touch,
+  type,
+} as const;
 
-export function useThemeTokens() {
-  const { width } = useWindowDimensions();
-  return useMemo(() => createThemeTokens(width), [width]);
-}
+export type Theme = typeof theme;

@@ -1,14 +1,21 @@
 {
   "expo": {
-    "name": "Objection!",
-    "slug": "objection-habit-court",
+    "name": "OBJECTION!",
+    "slug": "objection-app",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
-    "platforms": ["ios", "android", "web"],
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "platforms": ["android", "web"],
+    "android": {
+      "package": "ir.objection.app",
+      "supportsRtl": true
+    },
     "web": {
-      "bundler": "metro",
       "output": "single"
+    },
+    "extra": {
+      "defaultServerUrl": "http://127.0.0.1:8000"
     }
   }
 }

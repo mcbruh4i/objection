@@ -22,3 +22,9 @@ mobile/.env
 *.log
 .DS_Store
 Thumbs.db
+
+mobile_old_*/
+v5_tmp/
+*.zip
+__pycache__/
+*.pyc

@@ -22,6 +22,8 @@ from .schemas import (
     FineResponse,
     HabitCreate,
     HabitResponse,
+    HistoryDayResponse,
+    HistoryResponse,
     JudgeVerdict,
     LedgerEntryResponse,
     LedgerResponse,
@@ -82,7 +84,7 @@ def _read_today(database_path: Path) -> TodayResponse:
             raise RuntimeError("Seeded habit is missing.")
         session = connection.execute(
             """
-            SELECT id, state, prosecutor_json FROM court_sessions
+            SELECT id, state, prosecutor_json, habit_id FROM court_sessions
             WHERE state IN ('awaiting_plea', 'awaiting_rebuttal')
             ORDER BY created_at DESC LIMIT 1
             """
@@ -98,7 +100,7 @@ def _read_today(database_path: Path) -> TodayResponse:
     return TodayResponse(
         habit=primary,
         habits=habits,
-        session=SessionSummary(id=session["id"], state=session["state"], prosecutor=prosecutor) if session else None,
+        session=SessionSummary(id=session["id"], state=session["state"], habit_id=session["habit_id"], prosecutor=prosecutor) if session else None,
     )
 
 
@@ -249,6 +251,33 @@ def _resolved_response(database_path: Path, session_id: str) -> RebuttalResponse
     )
 
 
+def _read_history(database_path: Path) -> HistoryResponse:
+    with connection_for(database_path) as connection:
+        habit_rows = connection.execute(
+            "SELECT substr(deadline_at, 1, 10) AS day, COUNT(*) AS total, "
+            "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed, "
+            "SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped "
+            "FROM habits GROUP BY day"
+        ).fetchall()
+        fine_rows = connection.execute(
+            "SELECT substr(created_at, 1, 10) AS day, SUM(amount_cents) AS fined FROM fines GROUP BY day"
+        ).fetchall()
+    fines_by_day = {row["day"]: row["fined"] or 0 for row in fine_rows}
+    days: dict[str, HistoryDayResponse] = {}
+    for row in habit_rows:
+        days[row["day"]] = HistoryDayResponse(
+            date=row["day"],
+            total=row["total"],
+            completed=row["completed"] or 0,
+            skipped=row["skipped"] or 0,
+            fine_cents=fines_by_day.get(row["day"], 0),
+        )
+    for day, fined in fines_by_day.items():
+        if day not in days:
+            days[day] = HistoryDayResponse(date=day, total=0, completed=0, skipped=0, fine_cents=fined)
+    return HistoryResponse(days=sorted(days.values(), key=lambda entry: entry.date, reverse=True))
+
+
 def create_app(database_path: str | Path | None = None) -> FastAPI:
     path = Path(database_path).resolve() if database_path else configured_database_path()
     adapter = LLMAdapter()
@@ -327,8 +356,30 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 if habit is None:
                     raise HTTPException(status_code=404, detail="Habit not found.")
                 if habit["status"] == "skipped":
-                    raise HTTPException(status_code=409, detail="A court session is already open for this habit.")
+                    open_session = connection.execute(
+                        "SELECT id FROM court_sessions WHERE habit_id = ? "
+                        "AND state IN ('awaiting_plea', 'awaiting_rebuttal') LIMIT 1",
+                        (habit_id,),
+                    ).fetchone()
+                    if open_session is not None:
+                        raise HTTPException(status_code=409, detail="A court session is already open for this habit.")
                 connection.execute("UPDATE habits SET status = 'completed' WHERE id = ?", (habit_id,))
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return _read_today(path)
+
+    @app.post("/habits/{habit_id}/uncomplete", response_model=TodayResponse)
+    def uncomplete_habit(habit_id: str) -> TodayResponse:
+        with connection_for(path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                habit = connection.execute("SELECT status FROM habits WHERE id = ?", (habit_id,)).fetchone()
+                if habit is None:
+                    raise HTTPException(status_code=404, detail="Habit not found.")
+                if habit["status"] == "completed":
+                    connection.execute("UPDATE habits SET status = 'pending' WHERE id = ?", (habit_id,))
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -348,7 +399,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 existing = connection.execute(
                     """
                     SELECT id, state FROM court_sessions
-                    WHERE habit_id = ?
+                    WHERE habit_id = ? AND state IN ('awaiting_plea', 'awaiting_rebuttal')
                     ORDER BY created_at DESC LIMIT 1
                     """,
                     (habit_id,),
@@ -584,6 +635,10 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
     @app.get("/ledger", response_model=LedgerResponse)
     def get_ledger() -> LedgerResponse:
         return _read_ledger(path)
+
+    @app.get("/history", response_model=HistoryResponse)
+    def get_history() -> HistoryResponse:
+        return _read_history(path)
 
     if _demo_reset_enabled():
 
