@@ -28,6 +28,20 @@ const SHADOW = 0.2 * EM; // 5px 5px 0 box-shadow
 const PAD = BORDER / 2 + 1; // canvas padding for the centered stroke
 const CANVAS = BOX + 2 * PAD + SHADOW;
 
+/**
+ * Exported animation contract (owner spec, round 3): companions that must
+ * stay frame-synchronized with this checkbox (the skip-box height collapse)
+ * derive their timing from HERE, never from copied literals.
+ *
+ * CHECK  = pop (200ms) running in parallel with splash (210ms + 90ms) →
+ *          total motion ends at max(200, 300) = 300ms.
+ * UNCHECK = pop only (tick is reset instantly) → 200ms.
+ */
+export const CHECK_TOTAL_MS = 300;
+export const UNCHECK_TOTAL_MS = 200;
+/** The pop's back-out curve — the same family companions must use. */
+export const CHECK_EASING = Easing.bezier(0.175, 0.885, 0.32, 1.275);
+
 // Token mapping of the original INK / PAPER / ORANGE constants.
 const INK = theme.colors.line;
 const PAPER = theme.colors.surface;

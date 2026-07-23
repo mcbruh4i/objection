@@ -1,40 +1,44 @@
 /**
- * One habit row. Interaction states (owner-corrected design, round 2):
+ * One habit row. Interaction states (round-3 spec):
  *
- * pending    → live check + SkipBox («امروز نمی‌تونم») underneath
- * completed  → checked; tap again to uncheck (real /uncomplete round-trip)
+ * pending    → live check + cadence-worded SkipBox underneath
+ * completed  → checked; tap again to uncheck (/uncomplete round-trip)
  * skipped + open session   → check disabled (stays UNCHECKED — skip never
  *                            checks the box), red "در دادگاه" chip resumes court
- * skipped + resolved case  → SEALED: the unchecked checkbox stays visually
- *                            present underneath, everything is
- *                            non-interactive, and a VerdictStamp overlay
- *                            (compact) covers the checkbox + skip-box area:
- *                            rejected → GUILTY (red ink), accepted →
- *                            DISMISSED (dark ink). Unknown verdict (fresh
- *                            install) → no stamp, «مختومه» chip only.
+ * skipped + resolved case  → SEALED: content non-interactive; a transparent
+ *                            ink-only VerdictStamp (GUILTY red / DISMISSED
+ *                            dark) covers the ENTIRE card, centered, tilted;
+ *                            title/fine/checkbox stay visible through it.
+ *                            Unknown verdict → chip only, never a guess.
  *
- * `busy` is per-habit (the shared-busy bug dimmed every card at once).
+ * Optimistic choreography (round 3): the parent flips habit.status
+ * optimistically on tap, so in ONE commit the checkbox starts its tick AND
+ * SkipCollapse starts the height collapse — same duration, same easing,
+ * same start/end frames (contract exported by BrutalCheckbox). The skip box
+ * stays MOUNTED for pending/completed so server reconciliation mid-animation
+ * never causes a layout jump.
  */
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import type { Habit, VerdictKind } from "../../api/types";
+import type { HabitCadence } from "../../state/cadenceStore";
 import { AppText } from "../common/AppText";
 import { BruteCard } from "../common/BruteCard";
 import { BruteCheck } from "../common/BruteCheck";
 import { VerdictStamp } from "../court/VerdictStamp";
 import { SkipBox } from "./SkipBox";
+import { SkipCollapse } from "./SkipCollapse";
 import { formatMoney, formatTimeOfIso } from "../../utils/format";
 import { theme } from "../../theme/tokens";
 
 interface Props {
   habit: Habit;
+  cadence: HabitCadence;
   /** True when this habit owns the currently open court session. */
   hasOpenSession: boolean;
   /** How this habit's court case resolved (client-side record), if known. */
   verdict: VerdictKind | null;
-  /** True only while THIS habit has a request in flight. */
-  busy: boolean;
   onToggleComplete: (habit: Habit) => void;
   onSkip: (habit: Habit) => void;
   onResumeCourt: () => void;
@@ -42,9 +46,9 @@ interface Props {
 
 export function HabitCard({
   habit,
+  cadence,
   hasOpenSession,
   verdict,
-  busy,
   onToggleComplete,
   onSkip,
   onResumeCourt,
@@ -70,7 +74,7 @@ export function HabitCard({
             // Skip never checks the box: a skipped habit's check stays in its
             // unattempted state through the whole court flow and after.
             checked={completed}
-            disabled={busy || skipped}
+            disabled={skipped}
             onToggle={() => onToggleComplete(habit)}
             accessibilityLabel={checkLabel}
           />
@@ -93,14 +97,18 @@ export function HabitCard({
           </View>
         </View>
 
-        {habit.status === "pending" ? (
-          <View style={styles.underRow}>
-            <SkipBox onPress={() => onSkip(habit)} disabled={busy} />
-          </View>
+        {/* Mounted for pending AND completed: the collapse/expand is a
+            synchronized height animation, never a mount/unmount jump. */}
+        {!skipped ? (
+          <SkipCollapse visible={habit.status === "pending"}>
+            <View style={styles.skipUnder}>
+              <SkipBox habitId={habit.id} cadence={cadence} onPress={() => onSkip(habit)} />
+            </View>
+          </SkipCollapse>
         ) : null}
 
         {skipped ? (
-          <View style={styles.underRow}>
+          <View style={styles.chipUnder}>
             {hasOpenSession ? (
               <Pressable
                 accessibilityRole="button"
@@ -124,15 +132,15 @@ export function HabitCard({
       </View>
 
       {judged && verdict ? (
-        // The seal: same stamp as the courtroom verdict, card-scale, slammed
-        // over the checkbox + skip-box area. Checkbox stays visible beneath.
+        // The seal: pure ink, no plate — slammed diagonally across the WHOLE
+        // card at near card width. Content stays visible through it.
         <View
           style={styles.stampOverlay}
           accessible
           accessibilityLabel={t("today.habit_judged_locked_a11y")}
         >
           <View style={styles.stampZone}>
-            <VerdictStamp verdict={verdict} compact />
+            <VerdictStamp verdict={verdict} mode="seal" />
           </View>
         </View>
       ) : null}
@@ -158,9 +166,14 @@ const styles = StyleSheet.create({
   struck: {
     textDecorationLine: "line-through",
   },
-  underRow: {
+  // Inside SkipCollapse: paddingTop (not margin) so the measured height
+  // includes the gap and the collapse eats it smoothly too.
+  skipUnder: {
+    paddingTop: theme.spacing.md,
+    marginStart: theme.spacing.x4l,
+  },
+  chipUnder: {
     marginTop: theme.spacing.md,
-    // Indent under the text column, not under the check (RTL start side).
     marginStart: theme.spacing.x4l,
   },
   sealedUnder: {
@@ -172,15 +185,12 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    // flexDirection row follows RTL, so the zone hugs the inline-start side —
-    // exactly where the checkbox and the (now gone) skip box live.
-    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     pointerEvents: "none",
   },
   stampZone: {
-    width: "55%",
-    alignItems: "center",
+    width: "94%",
   },
   courtChip: {
     alignSelf: "flex-start",

@@ -1,7 +1,8 @@
 /**
- * Fine-cadence selector for new habits: daily / weekly / monthly.
- * NO yearly option exists (owner decision). Active segment = solid ink flood,
- * instant switch — same brutalist pattern as the history tabs.
+ * Cadence FILTER TABS: daily / weekly / monthly (owner spec, round 3 — the
+ * control filters the habit list AND decides what cadence the add-input
+ * creates). NO yearly option exists (owner decision). Active tab = solid ink
+ * flood, instant switch — same brutalist pattern as the history tabs.
  */
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
@@ -25,7 +26,7 @@ export function CadencePicker({ value, onChange, disabled = false }: Props): Rea
         return (
           <Pressable
             key={cadence}
-            accessibilityRole="radio"
+            accessibilityRole="tab"
             accessibilityState={{ selected: active, disabled }}
             onPress={() => onChange(cadence)}
             disabled={disabled}

@@ -1,36 +1,57 @@
 /**
- * The «امروز نمی‌تونم» little box under each pending habit.
- * This is the dramatic trigger: pressing it opens a court session.
- * Colloquial user-voice copy + a warning hint that court follows.
+ * The skip box under each pending habit — the dramatic trigger that opens a
+ * court session.
+ *
+ * Round-3 spec: wording is cadence-aware (daily «امروز…», weekly «این
+ * هفته…», monthly «این ماه…») with 3 rotating variants per cadence, plus 3
+ * rotating court-warning hints — picked DETERMINISTICALLY per habit id so a
+ * card's wording is stable across renders and reloads (no flicker), while
+ * different habits get variety.
  */
 import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { AppText } from "../common/AppText";
+import type { HabitCadence } from "../../state/cadenceStore";
 import { theme } from "../../theme/tokens";
 
 interface Props {
+  habitId: string;
+  cadence: HabitCadence;
   onPress: () => void;
-  disabled?: boolean;
 }
 
-export function SkipBox({ onPress, disabled = false }: Props): React.JSX.Element {
+const VARIANTS = 3;
+
+/** Cheap stable hash of the habit id → variant index (deterministic). */
+function stableIndex(seed: string, salt: number): number {
+  let hash = salt;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 997;
+  }
+  return (hash % VARIANTS) + 1; // i18n keys are 1-based
+}
+
+export function SkipBox({ habitId, cadence, onPress }: Props): React.JSX.Element {
   const { t } = useTranslation();
+  // Different salts de-correlate label and hint picks.
+  const label = t(`today.skip_label_${cadence}_${stableIndex(habitId, 7)}`);
+  const hint = t(`today.skip_hint_${stableIndex(habitId, 131)}`);
+
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={t("today.skip_box_label")}
+      accessibilityLabel={label}
       onPress={onPress}
-      disabled={disabled}
       hitSlop={theme.touch.hitSlop}
-      style={[styles.box, disabled && styles.disabled]}
+      style={styles.box}
     >
       <View style={styles.flag} />
       <AppText variant="label" color="danger">
-        {t("today.skip_box_label")}
+        {label}
       </AppText>
       <AppText variant="caption" color="textMuted">
-        {t("today.skip_box_hint")}
+        {hint}
       </AppText>
     </Pressable>
   );
@@ -40,6 +61,7 @@ const styles = StyleSheet.create({
   box: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: theme.spacing.sm,
     alignSelf: "flex-start",
     borderWidth: theme.borders.bold,
@@ -56,8 +78,5 @@ const styles = StyleSheet.create({
     height: theme.spacing.sm,
     backgroundColor: theme.colors.danger,
     borderRadius: theme.radii.none,
-  },
-  disabled: {
-    opacity: theme.opacity.disabled,
   },
 });

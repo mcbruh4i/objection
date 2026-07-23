@@ -1,17 +1,27 @@
 /**
  * TODAY — the paper world home.
- * Jalali header · resume-court banner · add-habit input (with fine cadence)
- * · daily promises · weekly/monthly target sections · history tabs.
+ * Jalali header · resume-court banner · cadence FILTER TABS (daily/weekly/
+ * monthly — each shows only its own habits, and the add-input creates into
+ * the active tab) · habit list · history tabs.
  *
- * Busy state is scoped PER HABIT (pendingHabitId): toggling one habit never
- * dims or disables the other cards (fix for the shared-busy bug, round 1).
+ * Optimistic check/uncheck (round-3 spec): the tap flips the habit's status
+ * locally in the SAME commit — the checkbox tick and the skip-box height
+ * collapse start together, before the API responds (zero input lag). The
+ * server response reconciles afterward; a failure rolls the status back
+ * (reverse animation) with a visible error notice.
  */
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useTranslation } from "react-i18next";
-import type { Habit, HistoryDay, SessionSummary, TodayResponse } from "../api/types";
+import type {
+  Habit,
+  HabitStatus,
+  HistoryDay,
+  SessionSummary,
+  TodayResponse,
+} from "../api/types";
 import { MAX_HABITS_PER_DAY } from "../api/types";
 import type { RootStackParamList } from "../navigation/types";
 import { useApi } from "../state/ApiContext";
@@ -31,6 +41,7 @@ import { LoadingBlock } from "../components/common/LoadingBlock";
 import { AppText } from "../components/common/AppText";
 import { JalaliHeader } from "../components/today/JalaliHeader";
 import { AddHabitInput } from "../components/today/AddHabitInput";
+import { CadencePicker } from "../components/today/CadencePicker";
 import { HabitCard } from "../components/today/HabitCard";
 import { ResumeCourtBanner } from "../components/today/ResumeCourtBanner";
 import { HistoryPanel } from "../components/today/HistoryPanel";
@@ -39,6 +50,18 @@ import { toPersianDigits } from "../utils/format";
 import { theme } from "../theme/tokens";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+
+const SECTION_TITLE_KEY: Record<HabitCadence, string> = {
+  daily: "today.habits_title",
+  weekly: "today.weekly_title",
+  monthly: "today.monthly_title",
+};
+
+const EMPTY_KEY: Record<HabitCadence, string> = {
+  daily: "today.empty_habits",
+  weekly: "today.empty_weekly",
+  monthly: "today.empty_monthly",
+};
 
 function isOpen(session: SessionSummary | null): session is SessionSummary {
   return session !== null && session.state !== "resolved";
@@ -53,13 +76,19 @@ export function TodayScreen(): React.JSX.Element {
   const [historyDays, setHistoryDays] = useState<readonly HistoryDay[]>([]);
   const [cadences, setCadences] = useState<CadenceMap>({});
   const [verdicts, setVerdicts] = useState<VerdictMap>({});
+  const [activeCadence, setActiveCadence] = useState<HabitCadence>("daily");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  /** Habit id with a request in flight — ONLY that card's controls lock. */
-  const [pendingHabitId, setPendingHabitId] = useState<string | null>(null);
-  /** Separate flag for the add form. */
   const [adding, setAdding] = useState(false);
+  /**
+   * Optimistic status flips (habit id → status shown NOW). The flip lands in
+   * the same commit as the tap, so the tick + collapse start immediately;
+   * the entry is cleared on reconciliation (success) or rollback (failure).
+   */
+  const [optimistic, setOptimistic] = useState<Record<string, HabitStatus>>({});
+  /** Logical double-fire guard — deliberately NOT visual (no dimming). */
+  const inFlight = useRef<Set<string>>(new Set());
 
   const load = useCallback(async (): Promise<void> => {
     setLoadError(null);
@@ -113,15 +142,22 @@ export function TodayScreen(): React.JSX.Element {
 
   const toggleComplete = useCallback(
     async (habit: Habit): Promise<void> => {
-      setPendingHabitId(habit.id);
+      if (inFlight.current.has(habit.id)) return;
+      inFlight.current.add(habit.id);
+      const targetStatus: HabitStatus = habit.status === "completed" ? "pending" : "completed";
       setNotice(null);
+      // Optimistic flip — tick + skip-box collapse start THIS commit.
+      setOptimistic((current) => ({ ...current, [habit.id]: targetStatus }));
       try {
         const response =
-          habit.status === "completed"
-            ? await api.uncompleteHabit(habit.id)
-            : await api.completeHabit(habit.id);
+          targetStatus === "completed"
+            ? await api.completeHabit(habit.id)
+            : await api.uncompleteHabit(habit.id);
+        // Reconcile: authoritative server state replaces the optimistic flip
+        // in one commit (checked prop stays equal → no visual snap).
         setToday(response);
       } catch (error) {
+        // Rollback: clearing the flip reverses both animations, with notice.
         setNotice(
           apiErrorMessage(error, t, {
             409: t("today.conflict_open_case"),
@@ -129,16 +165,22 @@ export function TodayScreen(): React.JSX.Element {
           }),
         );
       } finally {
-        setPendingHabitId(null);
+        setOptimistic((current) => {
+          const next = { ...current };
+          delete next[habit.id];
+          return next;
+        });
+        inFlight.current.delete(habit.id);
       }
     },
     [api, t],
   );
 
   const addHabit = useCallback(
-    async (title: string, cadence: HabitCadence): Promise<void> => {
+    async (title: string): Promise<void> => {
       setAdding(true);
       setNotice(null);
+      const cadence = activeCadence;
       const previousIds = new Set(today?.habits.map((h) => h.id) ?? []);
       try {
         const response = await api.createHabit({
@@ -163,12 +205,13 @@ export function TodayScreen(): React.JSX.Element {
         setAdding(false);
       }
     },
-    [api, t, today],
+    [api, t, today, activeCadence],
   );
 
   const skip = useCallback(
     async (habit: Habit): Promise<void> => {
-      setPendingHabitId(habit.id);
+      if (inFlight.current.has(habit.id)) return;
+      inFlight.current.add(habit.id);
       setNotice(null);
       try {
         const response = await api.skipHabit(habit.id);
@@ -192,37 +235,25 @@ export function TodayScreen(): React.JSX.Element {
           }),
         );
       } finally {
-        setPendingHabitId(null);
+        inFlight.current.delete(habit.id);
       }
     },
     [api, t, navigation, openSession, load],
   );
 
-  /** Section grouping by client-side cadence (default: daily). */
-  const sections = useMemo(() => {
+  /** Server habits with optimistic status flips applied. */
+  const effectiveHabits = useMemo(() => {
     const habits = today?.habits ?? [];
-    const byCadence: Record<HabitCadence, Habit[]> = { daily: [], weekly: [], monthly: [] };
-    for (const habit of habits) {
-      byCadence[cadenceOf(cadences, habit.id)].push(habit);
-    }
-    return byCadence;
-  }, [today, cadences]);
+    return habits.map((habit) => {
+      const flipped = optimistic[habit.id];
+      return flipped && flipped !== habit.status ? { ...habit, status: flipped } : habit;
+    });
+  }, [today, optimistic]);
 
-  const renderList = (habits: Habit[]): React.JSX.Element => (
-    <View style={styles.list}>
-      {habits.map((habit) => (
-        <HabitCard
-          key={habit.id}
-          habit={habit}
-          hasOpenSession={openSession?.habit_id === habit.id}
-          verdict={verdicts[habit.id] ?? null}
-          busy={pendingHabitId === habit.id}
-          onToggleComplete={(h) => void toggleComplete(h)}
-          onSkip={(h) => void skip(h)}
-          onResumeCourt={() => (openSession ? goToCourt(openSession) : undefined)}
-        />
-      ))}
-    </View>
+  /** The active tab shows ONLY its own cadence (round-3 spec). */
+  const visibleHabits = useMemo(
+    () => effectiveHabits.filter((habit) => cadenceOf(cadences, habit.id) === activeCadence),
+    [effectiveHabits, cadences, activeCadence],
   );
 
   return (
@@ -245,30 +276,34 @@ export function TodayScreen(): React.JSX.Element {
       ) : today ? (
         <>
           <View style={styles.section}>
-            <SectionHeader title={t("today.habits_title")} />
-            <AddHabitInput onSubmit={(title, cadence) => void addHabit(title, cadence)} busy={adding} />
-            {today.habits.length === 0 ? (
+            <SectionHeader title={t(SECTION_TITLE_KEY[activeCadence])} />
+            <CadencePicker value={activeCadence} onChange={setActiveCadence} />
+            <AddHabitInput
+              cadence={activeCadence}
+              onSubmit={(title) => void addHabit(title)}
+              busy={adding}
+            />
+            {visibleHabits.length === 0 ? (
               <AppText variant="body" color="textMuted">
-                {t("today.empty_habits")}
+                {t(EMPTY_KEY[activeCadence])}
               </AppText>
             ) : (
-              renderList(sections.daily)
+              <View style={styles.list}>
+                {visibleHabits.map((habit) => (
+                  <HabitCard
+                    key={habit.id}
+                    habit={habit}
+                    cadence={cadenceOf(cadences, habit.id)}
+                    hasOpenSession={openSession?.habit_id === habit.id}
+                    verdict={verdicts[habit.id] ?? null}
+                    onToggleComplete={(h) => void toggleComplete(h)}
+                    onSkip={(h) => void skip(h)}
+                    onResumeCourt={() => (openSession ? goToCourt(openSession) : undefined)}
+                  />
+                ))}
+              </View>
             )}
           </View>
-
-          {sections.weekly.length > 0 ? (
-            <View style={styles.section}>
-              <SectionHeader title={t("today.weekly_title")} />
-              {renderList(sections.weekly)}
-            </View>
-          ) : null}
-
-          {sections.monthly.length > 0 ? (
-            <View style={styles.section}>
-              <SectionHeader title={t("today.monthly_title")} />
-              {renderList(sections.monthly)}
-            </View>
-          ) : null}
 
           <View style={styles.section}>
             <SectionHeader title={t("today.history_title")} />
