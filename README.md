@@ -1,3 +1,7 @@
+> **Status: Archived — July 2026.**
+> Built solo in ~2 weeks. Shipped decision: market config (free product × broke audience × Iran-only) doesn't make a business. Full story: POSTMORTEM.md
+
+
 # Objection!
 
 `Objection!` is a local-first Expo + FastAPI hackathon prototype. A player can
